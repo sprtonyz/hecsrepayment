@@ -11,7 +11,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "review:latest": "node scripts/pull-latest-review.mjs"
+    "review:latest": "node scripts/pull-latest-review.mjs",
+    "review:publish": "node scripts/publish-latest-review.mjs"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.3",

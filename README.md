@@ -44,7 +44,10 @@ Once that is configured:
 - Clicking `Fetch AAPL articles` on the deployed app will still cache locally on that device, and it will also upsert the fetched articles into Supabase.
 - AI article analyses from `/api/news/analyze` will also sync into Supabase when they run.
 - On your local machine, run `npm run review:latest` to pull the latest shared bundle into `data/news-review-queue/YYYY-MM-aapl-codex-review.json`.
-- If `SHARED_REVIEW_TOKEN` is set, the helper script sends it as `x-review-token` automatically.
+- After Codex adds a `codexReview` into that local bundle, run `npm run review:publish` to push the finished review back into the shared backend.
+- No extra database migration is needed for review publishing if shared article sync is already working; the published review is stored alongside the shared news records.
+- The deployed app will read a shared Codex review from Supabase first, then fall back to the local file route if no shared review exists yet.
+- If `SHARED_REVIEW_TOKEN` is set, both helper scripts send it as `x-review-token` automatically.
 
 ## Scripts
 
@@ -53,6 +56,7 @@ npm run test
 npm run lint
 npm run build
 npm run review:latest
+npm run review:publish
 ```
 
 ## Market Data Notes

@@ -6,9 +6,12 @@ import {
   buildCodexReviewBundle,
   reviewBundleFilename,
 } from "@/lib/news/codexReviewBundleBuilder";
-
-const symbolSchema = z.string().min(1).max(12).regex(/^[a-z0-9.-]+$/i);
-const reviewMonthSchema = z.string().regex(/^\d{4}-\d{2}$/);
+import {
+  codexReviewSchema,
+  reviewMonthSchema,
+  symbolSchema,
+} from "@/lib/news/codexReviewSchemas";
+import { getSharedCodexReview } from "@/lib/shared-news/store";
 
 const newsArticleSchema = z.object({
   id: z.string().min(1),
@@ -53,30 +56,6 @@ const bodySchema = z.object({
   guideContext: z.record(z.string(), z.unknown()).optional(),
 });
 
-const appliedNewsDigestSchema = z.object({
-  signal: z.enum(["positive", "neutral", "negative"]),
-  confidence: z.enum(["low", "medium", "high"]),
-  articleCount: z.number(),
-  providerCount: z.number(),
-  providers: z.array(z.string()),
-  failedProviders: z.array(z.string()).optional(),
-  publisherCount: z.number().optional(),
-  publishers: z.array(z.string()).optional(),
-  score: z.number().optional(),
-  headlines: z.array(z.string()).optional(),
-  positiveArticleCount: z.number().optional(),
-  negativeArticleCount: z.number().optional(),
-  neutralArticleCount: z.number().optional(),
-  materialArticleCount: z.number().optional(),
-  highMaterialityCount: z.number().optional(),
-  escalatedCount: z.number().optional(),
-  analysisMode: z.literal("codexReview"),
-});
-
-const codexReviewSchema = z.object({
-  appliedNewsDigest: appliedNewsDigestSchema,
-}).passthrough();
-
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const parsed = z.object({
@@ -95,6 +74,22 @@ export async function GET(request: NextRequest) {
     parsed.data.symbol,
     parsed.data.reviewMonth,
   );
+  const sharedReview = await readSharedCodexReview(
+    parsed.data.symbol,
+    parsed.data.reviewMonth,
+  );
+  if (sharedReview?.codexReview) {
+    const codexReview = codexReviewSchema.safeParse(sharedReview.codexReview);
+    if (codexReview.success) {
+      return noStoreJson({
+        filename: sharedReview.filename || filename,
+        generatedAt: sharedReview.generatedAt,
+        includedArticleCount: sharedReview.includedArticleCount,
+        codexReview: codexReview.data,
+      });
+    }
+  }
+
   const bundle = await readReviewBundle(absolutePath);
   if (!bundle) {
     return noStoreJson({
@@ -121,7 +116,11 @@ export async function POST(request: NextRequest) {
 
   const { symbol, reviewMonth, guideContext } = parsed.data;
   const { absolutePath, filename } = reviewBundlePath(symbol, reviewMonth);
-  const existingCodexReview = await readExistingCodexReview(absolutePath);
+  const existingCodexReview = await readExistingCodexReview(
+    absolutePath,
+    symbol,
+    reviewMonth,
+  );
   const result = await buildCodexReviewBundle({
     symbol,
     reviewMonth,
@@ -167,7 +166,19 @@ function noStoreJson(body: unknown, init?: ResponseInit) {
   });
 }
 
-async function readExistingCodexReview(absolutePath: string) {
+async function readExistingCodexReview(
+  absolutePath: string,
+  symbol: string,
+  reviewMonth: string,
+) {
+  const sharedReview = await readSharedCodexReview(symbol, reviewMonth);
+  if (sharedReview?.codexReview) {
+    const codexReview = codexReviewSchema.safeParse(sharedReview.codexReview);
+    if (codexReview.success) {
+      return codexReview.data;
+    }
+  }
+
   const bundle = await readReviewBundle(absolutePath);
   if (!bundle) {
     return undefined;
@@ -194,4 +205,12 @@ function isNotFoundError(error: unknown) {
     "code" in error &&
     (error as { code?: string }).code === "ENOENT"
   );
+}
+
+async function readSharedCodexReview(symbol: string, reviewMonth: string) {
+  try {
+    return await getSharedCodexReview(symbol, reviewMonth);
+  } catch {
+    return undefined;
+  }
 }

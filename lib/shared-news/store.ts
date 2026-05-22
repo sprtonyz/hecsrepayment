@@ -4,6 +4,8 @@ import { getSharedNewsConfig, isSharedNewsSyncEnabled } from "@/lib/shared-news/
 
 const SHARED_ARTICLES_TABLE = "shared_news_articles";
 const SHARED_ANALYSES_TABLE = "shared_news_analyses";
+const SHARED_REVIEW_PROVIDER = "codexReview";
+const SHARED_REVIEW_SOURCE = "Codex";
 
 type SharedNewsArticleRow = {
   id: string;
@@ -62,6 +64,26 @@ export type SharedNewsSnapshot = {
   sourceUpdatedAt?: string;
   articles: CachedNewsArticle[];
   analyses: CachedNewsAnalysis[];
+};
+
+export type SharedCodexReviewSnapshot = {
+  enabled: boolean;
+  reviewMonth?: string;
+  filename?: string;
+  generatedAt?: string;
+  includedArticleCount?: number;
+  sourceUpdatedAt?: string;
+  codexReview?: Record<string, unknown>;
+};
+
+export type SharedCodexReviewInput = {
+  symbol: string;
+  reviewMonth: string;
+  filename?: string;
+  generatedAt?: string;
+  includedArticleCount?: number;
+  sourceUpdatedAt?: string;
+  codexReview: Record<string, unknown>;
 };
 
 export type SharedSyncResult = {
@@ -190,6 +212,7 @@ export async function getLatestSharedNewsSnapshot(
     .select("*")
     .eq("symbol", normalizedSymbol)
     .eq("review_month", reviewMonth)
+    .neq("provider", SHARED_REVIEW_PROVIDER)
     .order("published_at", { ascending: false, nullsFirst: false })
     .order("last_fetched_at", { ascending: false, nullsFirst: false });
 
@@ -232,6 +255,65 @@ export async function getLatestSharedNewsSnapshot(
     articles,
     analyses,
   };
+}
+
+export async function upsertSharedCodexReview(
+  input: SharedCodexReviewInput,
+): Promise<SharedCodexReviewSnapshot> {
+  if (!isSharedNewsSyncEnabled()) {
+    return { enabled: false };
+  }
+
+  const row = toSharedCodexReviewRow(input);
+  const supabase = createSharedNewsClient();
+  const { error } = await supabase
+    .from(SHARED_ARTICLES_TABLE)
+    .upsert(row, { onConflict: "id" });
+
+  if (error) {
+    throw new Error(`Shared Codex review sync failed: ${error.message}`);
+  }
+
+  return fromSharedCodexReviewRow(row);
+}
+
+export async function getSharedCodexReview(
+  symbol: string,
+  explicitReviewMonth?: string,
+): Promise<SharedCodexReviewSnapshot> {
+  if (!isSharedNewsSyncEnabled()) {
+    return { enabled: false };
+  }
+
+  const normalizedSymbol = symbol.toUpperCase();
+  const supabase = createSharedNewsClient();
+  let query = supabase
+    .from(SHARED_ARTICLES_TABLE)
+    .select("*")
+    .eq("symbol", normalizedSymbol)
+    .eq("provider", SHARED_REVIEW_PROVIDER);
+
+  if (explicitReviewMonth) {
+    query = query.eq("review_month", explicitReviewMonth);
+  } else {
+    query = query
+      .order("review_month", { ascending: false })
+      .order("last_fetched_at", { ascending: false, nullsFirst: false });
+  }
+
+  const { data, error } = await query.limit(1).maybeSingle();
+
+  if (error) {
+    throw new Error(`Shared Codex review read failed: ${error.message}`);
+  }
+
+  if (!data) {
+    return {
+      enabled: true,
+    };
+  }
+
+  return fromSharedCodexReviewRow(data as SharedNewsArticleRow);
 }
 
 function createSharedNewsClient() {
@@ -380,6 +462,69 @@ function fromSharedAnalysisRow(row: SharedNewsAnalysisRow): CachedNewsAnalysis {
   };
 }
 
+function toSharedCodexReviewRow(input: SharedCodexReviewInput): SharedNewsArticleRow {
+  const normalizedSymbol = input.symbol.toUpperCase();
+  const reviewMonth = reviewMonthForValue(input.reviewMonth);
+  const filename =
+    input.filename || `${reviewMonth}-${normalizedSymbol.toLowerCase()}-codex-review.json`;
+  const persistedAt = input.sourceUpdatedAt || input.generatedAt || new Date().toISOString();
+  const appliedNewsDigest = isRecord(input.codexReview.appliedNewsDigest)
+    ? input.codexReview.appliedNewsDigest
+    : undefined;
+  return {
+    id: `shared-review:${normalizedSymbol}:${reviewMonth}`,
+    review_month: reviewMonth,
+    symbol: normalizedSymbol,
+    title: `${normalizedSymbol} Codex review for ${reviewMonth}`,
+    summary: typeof input.codexReview.rationale === "string" ? input.codexReview.rationale : null,
+    url: `shared-review://${normalizedSymbol}/${reviewMonth}`,
+    source: SHARED_REVIEW_SOURCE,
+    provider: SHARED_REVIEW_PROVIDER,
+    published_at: input.generatedAt ?? null,
+    collected_at: persistedAt,
+    cached_at: persistedAt,
+    last_fetched_at: persistedAt,
+    signal:
+      appliedNewsDigest?.signal === "positive" ||
+      appliedNewsDigest?.signal === "negative" ||
+      appliedNewsDigest?.signal === "neutral"
+        ? appliedNewsDigest.signal
+        : "neutral",
+    signal_score:
+      typeof appliedNewsDigest?.score === "number" ? appliedNewsDigest.score : 0,
+    matched_terms: [],
+    raw: {
+      kind: "codexReview",
+      filename,
+      generatedAt: input.generatedAt,
+      includedArticleCount: Math.max(0, Math.round(input.includedArticleCount ?? 0)),
+      sourceUpdatedAt: input.sourceUpdatedAt,
+      codexReview: input.codexReview,
+    },
+    updated_at: persistedAt,
+  };
+}
+
+function fromSharedCodexReviewRow(row: SharedNewsArticleRow): SharedCodexReviewSnapshot {
+  const payload = isRecord(row.raw) ? row.raw : undefined;
+  return {
+    enabled: true,
+    reviewMonth: row.review_month,
+    filename: typeof payload?.filename === "string" ? payload.filename : undefined,
+    generatedAt:
+      typeof payload?.generatedAt === "string" ? payload.generatedAt : row.published_at ?? undefined,
+    includedArticleCount:
+      typeof payload?.includedArticleCount === "number"
+        ? payload.includedArticleCount
+        : undefined,
+    sourceUpdatedAt:
+      typeof payload?.sourceUpdatedAt === "string"
+        ? payload.sourceUpdatedAt
+        : row.last_fetched_at ?? undefined,
+    codexReview: isRecord(payload?.codexReview) ? payload.codexReview : undefined,
+  };
+}
+
 function reviewMonthForValue(value: string | undefined) {
   const month = value?.slice(0, 7);
   if (!month || !/^\d{4}-\d{2}$/.test(month)) {
@@ -396,4 +541,8 @@ function latestIso(values: Array<string | undefined>) {
   return values
     .filter((value): value is string => Boolean(value))
     .sort((left, right) => right.localeCompare(left))[0];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
