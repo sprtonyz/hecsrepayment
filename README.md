@@ -29,6 +29,8 @@ Finnhub is used when `FINNHUB_API_KEY` exists. Without it, the app uses the manu
 
 The dashboard can also prepare a monthly Codex review bundle from the This Month Deposit Guide. It writes up to 40 current-month articles, collected timestamps, readable article excerpts where available, cached API analysis, and guide context to `data/news-review-queue/YYYY-MM-aapl-codex-review.json` for a deeper local review.
 
+For the exact analyst workflow behind the `Review Latest` chat command, read [`REVIEW_LATEST.md`](./REVIEW_LATEST.md). That file is also referenced from `AGENTS.md` so future Codex chats know to use it first.
+
 ## Shared Review Sync
 
 If you want to fetch AAPL articles on any device and review them later with Codex on your local machine, enable the shared sync layer:
