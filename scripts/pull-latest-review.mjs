@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const { loadEnvConfig } = await import("@next/env");
+const { default: nextEnv } = await import("@next/env");
+const { loadEnvConfig } = nextEnv;
 
 loadEnvConfig(process.cwd());
 
