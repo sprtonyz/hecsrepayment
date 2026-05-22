@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAiNewsAnalysisMode } from "@/lib/ai/articleAnalysis";
 import { fetchFreeNewsDigest } from "@/lib/news/freeNewsProvider";
+import { upsertSharedNewsArticles } from "@/lib/shared-news/store";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -12,9 +13,41 @@ export async function GET(request: NextRequest) {
 
   try {
     const digest = await fetchFreeNewsDigest(symbol);
+    const syncedAt = new Date().toISOString();
+    let sharedSync:
+      | {
+          enabled: boolean;
+          synced: boolean;
+          message?: string;
+          reviewMonth?: string;
+          articleCount?: number;
+          sourceUpdatedAt?: string;
+        }
+      | undefined;
+
+    try {
+      sharedSync = await upsertSharedNewsArticles(
+        digest.articles.map((article) => ({
+          ...article,
+          collectedAt: syncedAt,
+          cachedAt: syncedAt,
+          lastFetchedAt: syncedAt,
+          raw: article,
+        })),
+        syncedAt,
+      );
+    } catch (error) {
+      sharedSync = {
+        enabled: true,
+        synced: false,
+        message: error instanceof Error ? error.message : "Shared news sync failed.",
+      };
+    }
+
     return NextResponse.json({
       ...digest,
       aiAnalysisMode: getAiNewsAnalysisMode(),
+      sharedSync,
     });
   } catch (error) {
     return NextResponse.json(

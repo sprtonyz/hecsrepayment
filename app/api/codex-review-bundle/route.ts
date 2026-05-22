@@ -2,11 +2,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { buildCodexReviewBrief } from "@/lib/news/codexReviewBundle";
-import { fetchReadableArticleText } from "@/lib/news/articleText";
-
-const MAX_MONTHLY_ARTICLES = 40;
-const MAX_BUNDLE_TEXT_CHARS = 8_000;
+import {
+  buildCodexReviewBundle,
+  reviewBundleFilename,
+} from "@/lib/news/codexReviewBundleBuilder";
 
 const symbolSchema = z.string().min(1).max(12).regex(/^[a-z0-9.-]+$/i);
 const reviewMonthSchema = z.string().regex(/^\d{4}-\d{2}$/);
@@ -121,110 +120,36 @@ export async function POST(request: NextRequest) {
   }
 
   const { symbol, reviewMonth, guideContext } = parsed.data;
-  const analysesByArticleId = new Map(
-    parsed.data.analyses.map((analysis) => [analysis.articleId, analysis]),
-  );
-  const selectedArticles = parsed.data.articles
-    .filter((article) => article.symbol.toUpperCase() === symbol.toUpperCase())
-    .filter((article) => monthKey(article.collectedAt || article.cachedAt || article.publishedAt) === reviewMonth)
-    .sort((left, right) => compareBundleArticles(left, right, analysesByArticleId))
-    .slice(0, MAX_MONTHLY_ARTICLES);
-
-  const articlesWithText = [];
-  for (const article of selectedArticles) {
-    const articleText = await fetchReadableArticleText(
-      article.url,
-      `${article.title}\n\n${article.summary ?? ""}`,
-    );
-    const existingAnalysis = analysesByArticleId.get(article.id);
-    articlesWithText.push({
-      id: article.id,
-      symbol: article.symbol,
-      title: article.title,
-      source: article.source,
-      provider: article.provider,
-      url: article.url,
-      publishedAt: article.publishedAt,
-      collectedAt: article.collectedAt || article.cachedAt,
-      lastFetchedAt: article.lastFetchedAt || article.cachedAt,
-      ageBucket: ageBucket(article.publishedAt || article.collectedAt || article.cachedAt),
-      headlineRuleSignal: article.signal,
-      headlineRuleScore: article.signalScore,
-      matchedTerms: article.matchedTerms,
-      summary: article.summary,
-      articleTextStatus: articleText.status,
-      readableTextExcerpt: articleText.text.slice(0, MAX_BUNDLE_TEXT_CHARS),
-      existingApiAnalysis: existingAnalysis
-        ? {
-            analyzedAt: existingAnalysis.analyzedAt,
-            mode: existingAnalysis.analysisMode,
-            model: existingAnalysis.finalModel,
-            escalatedModel: existingAnalysis.escalatedModel,
-            signal: existingAnalysis.signal,
-            confidence: existingAnalysis.confidence,
-            materiality: existingAnalysis.materiality,
-            thesisImpactScore: existingAnalysis.thesisImpactScore,
-            category: existingAnalysis.category,
-            timeHorizon: existingAnalysis.timeHorizon,
-            rationale: existingAnalysis.rationale,
-            evidence: existingAnalysis.evidence,
-            riskFlags: existingAnalysis.riskFlags,
-            opportunities: existingAnalysis.opportunities,
-          }
-        : undefined,
-    });
-  }
-
-  const generatedAt = new Date().toISOString();
   const { absolutePath, filename } = reviewBundlePath(symbol, reviewMonth);
   const existingCodexReview = await readExistingCodexReview(absolutePath);
-  const reviewBrief = buildCodexReviewBrief({
+  const result = await buildCodexReviewBundle({
     symbol,
     reviewMonth,
-    requestedArticleCount: parsed.data.articles.length,
-    includedArticleCount: articlesWithText.length,
+    articles: parsed.data.articles,
+    analyses: parsed.data.analyses,
     guideContext,
-    articles: articlesWithText,
+    existingCodexReview,
   });
-  const bundle = {
-    kind: "codex-monthly-news-review",
-    symbol: symbol.toUpperCase(),
-    reviewMonth,
-    generatedAt,
-    articleLimit: MAX_MONTHLY_ARTICLES,
-    requestedArticleCount: parsed.data.articles.length,
-    includedArticleCount: articlesWithText.length,
-    guideContext,
-    reviewBrief,
-    instructions: [
-      "Review this local bundle for the monthly AAPL deposit guide.",
-      "Prioritize durable thesis impact, unresolved legal/regulatory risk, earnings/product/service trends, and material competitive changes.",
-      "Downweight stale market chatter, repeated analyst/price-action articles, tokenization mechanics with no Apple-specific impact, and articles with only summary text.",
-      "Return a concise JSON review that the app can later load: signal, confidence, material items, stale/noisy items, unresolved themes, suggested guide impact, and rationale.",
-    ],
-    codexReview: existingCodexReview,
-    articles: articlesWithText,
-  };
 
   await mkdir(path.dirname(absolutePath), { recursive: true });
-  await writeFile(absolutePath, `${JSON.stringify(bundle, null, 2)}\n`, "utf8");
+  await writeFile(absolutePath, `${JSON.stringify(result.bundle, null, 2)}\n`, "utf8");
 
   return NextResponse.json({
     path: absolutePath,
     filename,
-    includedArticleCount: articlesWithText.length,
+    includedArticleCount: result.includedArticleCount,
     reviewBrief: {
-      duplicateGroupCount: reviewBrief.coverage.duplicateGroupCount,
-      likelyNoiseArticleCount: reviewBrief.coverage.likelyNoiseArticleCount,
-      articleTextStatusCounts: reviewBrief.coverage.articleTextStatusCounts,
+      duplicateGroupCount: result.reviewBrief.coverage.duplicateGroupCount,
+      likelyNoiseArticleCount: result.reviewBrief.coverage.likelyNoiseArticleCount,
+      articleTextStatusCounts: result.reviewBrief.coverage.articleTextStatusCounts,
     },
-    generatedAt,
+    generatedAt: result.generatedAt,
   });
 }
 
 function reviewBundlePath(symbol: string, reviewMonth: string) {
   const directory = path.join(process.cwd(), "data", "news-review-queue");
-  const filename = `${reviewMonth}-${symbol.toLowerCase()}-codex-review.json`;
+  const filename = reviewBundleFilename(symbol, reviewMonth);
   return {
     directory,
     filename,
@@ -269,60 +194,4 @@ function isNotFoundError(error: unknown) {
     "code" in error &&
     (error as { code?: string }).code === "ENOENT"
   );
-}
-
-function compareBundleArticles(
-  left: z.infer<typeof newsArticleSchema>,
-  right: z.infer<typeof newsArticleSchema>,
-  analysesByArticleId: Map<string, z.infer<typeof newsAnalysisSchema>>,
-) {
-  const leftAnalysis = analysesByArticleId.get(left.id);
-  const rightAnalysis = analysesByArticleId.get(right.id);
-  const scoreDiff =
-    articlePriority(right, rightAnalysis) - articlePriority(left, leftAnalysis);
-  if (scoreDiff !== 0) {
-    return scoreDiff;
-  }
-  return (right.collectedAt || right.cachedAt || right.publishedAt || "").localeCompare(
-    left.collectedAt || left.cachedAt || left.publishedAt || "",
-  );
-}
-
-function articlePriority(
-  article: z.infer<typeof newsArticleSchema>,
-  analysis?: z.infer<typeof newsAnalysisSchema>,
-) {
-  const materiality =
-    analysis?.materiality === "high" ? 8 : analysis?.materiality === "medium" ? 4 : 0;
-  const signal = Math.abs(analysis?.thesisImpactScore ?? article.signalScore);
-  const recency =
-    ageBucket(article.publishedAt || article.collectedAt || article.cachedAt) === "0-3d"
-      ? 3
-      : 0;
-  return materiality + signal + recency;
-}
-
-function monthKey(value: string | undefined) {
-  return value?.slice(0, 7);
-}
-
-function ageBucket(value: string | undefined) {
-  if (!value) {
-    return "unknown";
-  }
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) {
-    return "unknown";
-  }
-  const ageDays = Math.max(0, (Date.now() - timestamp) / 86_400_000);
-  if (ageDays <= 3) {
-    return "0-3d";
-  }
-  if (ageDays <= 7) {
-    return "4-7d";
-  }
-  if (ageDays <= 30) {
-    return "8-30d";
-  }
-  return "30d+";
 }

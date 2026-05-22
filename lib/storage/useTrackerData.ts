@@ -152,6 +152,14 @@ type NewsApiArticle = Omit<CachedNewsArticle, "raw" | "cachedAt" | "collectedAt"
 type NewsApiResponse = {
   articles?: NewsApiArticle[];
   aiAnalysisMode?: CachedNewsAnalysis["analysisMode"];
+  sharedSync?: {
+    enabled: boolean;
+    synced: boolean;
+    message?: string;
+    reviewMonth?: string;
+    articleCount?: number;
+    sourceUpdatedAt?: string;
+  };
 };
 type NewsAnalysisApiResponse = {
   enabled: boolean;
@@ -774,6 +782,9 @@ export function useTrackerData() {
           if (newsResult.analysisFailureCount > 0) {
             hadRefreshIssue = true;
           }
+          if (data.sharedSync?.enabled && !data.sharedSync.synced) {
+            hadRefreshIssue = true;
+          }
         } else {
           setLastNewsRefreshAt(nowIso());
           hadRefreshIssue = true;
@@ -846,6 +857,18 @@ export function useTrackerData() {
         notifyTrackerDataChanged();
         if (result.analysisFailureCount > 0) {
           const message = `${symbol} articles were fetched, but some AI article analyses failed.`;
+          setWarning(message);
+          toast.warning(message);
+        } else if (data.sharedSync?.enabled && data.sharedSync.synced) {
+          toast.success(
+            `Fetched ${result.articleCount} ${symbol} article${
+              result.articleCount === 1 ? "" : "s"
+            } and synced them for Review Latest`,
+          );
+        } else if (data.sharedSync?.enabled && !data.sharedSync.synced) {
+          const message =
+            data.sharedSync.message ||
+            `Fetched ${symbol} articles, but shared review sync did not complete.`;
           setWarning(message);
           toast.warning(message);
         } else {

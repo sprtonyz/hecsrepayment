@@ -27,7 +27,24 @@ OPENAI_NEWS_ANALYSIS_MODE=testing
 
 Finnhub is used when `FINNHUB_API_KEY` exists. Without it, the app uses the manual provider and demo fallback data. Frankfurter is used for USD/AUD and AUD/USD FX rates. The deposit guide also fetches free RSS headlines from Yahoo Finance, Google News, and, for AAPL, Apple Newsroom through the server-side `/api/news` route. If `OPENAI_API_KEY` is configured, `/api/news/analyze` runs in Testing Mode by default: up to 20 new articles are analyzed with `gpt-5-nano` and no escalation. Set `OPENAI_NEWS_ANALYSIS_MODE=performance` to use Performance Mode, which analyzes with `gpt-5.4-mini` and escalates high-impact or uncertain articles to `gpt-5.4`. Results are cached locally by article and mode.
 
-The dashboard can also prepare a monthly Codex review bundle from the This Month Deposit Guide. It writes up to 20 current-month articles, collected timestamps, readable article excerpts where available, cached API analysis, and guide context to `data/news-review-queue/YYYY-MM-aapl-codex-review.json` for a deeper local review.
+The dashboard can also prepare a monthly Codex review bundle from the This Month Deposit Guide. It writes up to 40 current-month articles, collected timestamps, readable article excerpts where available, cached API analysis, and guide context to `data/news-review-queue/YYYY-MM-aapl-codex-review.json` for a deeper local review.
+
+## Shared Review Sync
+
+If you want to fetch AAPL articles on any device and review them later with Codex on your local machine, enable the shared sync layer:
+
+1. Create a Supabase project.
+2. Run [`supabase/shared-review-schema.sql`](./supabase/shared-review-schema.sql) in the Supabase SQL editor.
+3. Add `SUPABASE_URL` and either `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY` to your Vercel project environment variables.
+4. Optionally set `SHARED_REVIEW_TOKEN` on Vercel if you want the `Review Latest` endpoint protected.
+5. Set `REVIEW_SOURCE_URL=https://hecs-repayment.vercel.app` in your local `.env.local` if you want the local helper script to pull from production.
+
+Once that is configured:
+
+- Clicking `Fetch AAPL articles` on the deployed app will still cache locally on that device, and it will also upsert the fetched articles into Supabase.
+- AI article analyses from `/api/news/analyze` will also sync into Supabase when they run.
+- On your local machine, run `npm run review:latest` to pull the latest shared bundle into `data/news-review-queue/YYYY-MM-aapl-codex-review.json`.
+- If `SHARED_REVIEW_TOKEN` is set, the helper script sends it as `x-review-token` automatically.
 
 ## Scripts
 
@@ -35,6 +52,7 @@ The dashboard can also prepare a monthly Codex review bundle from the This Month
 npm run test
 npm run lint
 npm run build
+npm run review:latest
 ```
 
 ## Market Data Notes
@@ -56,6 +74,6 @@ The model also lets you enter the observed payroll deduction, such as A$594/mont
 
 ## Storage
 
-The first version stores all user data locally in IndexedDB through `lib/storage/indexedDb.ts`, behind the `StorageAdapter` interface in `lib/storage/types.ts`.
+The core tracker still stores user-specific portfolio data locally in IndexedDB through `lib/storage/indexedDb.ts`, behind the `StorageAdapter` interface in `lib/storage/types.ts`.
 
-To switch later to Supabase/Postgres, implement the same `StorageAdapter` methods with Supabase tables for settings, sale events, contributions, trades, cached quotes, prices, dividends, splits, and FX rates, then swap the adapter used by `useTrackerData`.
+When shared review sync is configured, AAPL article fetches and AI article analyses are also mirrored into Supabase so a different machine can pull the latest review bundle later without manually exporting JSON from the browser first.

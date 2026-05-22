@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { analyzeArticleWithEscalation, getAiNewsAnalysisMode } from "@/lib/ai/articleAnalysis";
 import { fetchReadableArticleText } from "@/lib/news/articleText";
+import { upsertSharedNewsAnalyses } from "@/lib/shared-news/store";
 import type { NewsArticle } from "@/lib/news/types";
 
 const articleSchema = z.object({
@@ -66,10 +67,32 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  let sharedSync:
+    | {
+        enabled: boolean;
+        synced: boolean;
+        message?: string;
+        reviewMonth?: string;
+        analysisCount?: number;
+        sourceUpdatedAt?: string;
+      }
+    | undefined;
+
+  try {
+    sharedSync = await upsertSharedNewsAnalyses(analyses);
+  } catch (error) {
+    sharedSync = {
+      enabled: true,
+      synced: false,
+      message: error instanceof Error ? error.message : "Shared analysis sync failed.",
+    };
+  }
+
   return NextResponse.json({
     enabled: true,
     mode,
     analyses,
     failures,
+    sharedSync,
   });
 }
