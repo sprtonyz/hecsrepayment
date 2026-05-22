@@ -1,0 +1,1938 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
+import {
+  ArrowRight,
+  BarChart3,
+  CheckCircle2,
+  ChevronDown,
+  CircleDollarSign,
+  FileText,
+  GraduationCap,
+  Landmark,
+  ListChecks,
+  RefreshCw,
+  TrendingUp,
+  Trash2,
+  Wallet,
+} from "lucide-react";
+import { ContributionBarChart } from "@/components/charts/contribution-bar-chart";
+import { GapAreaChart } from "@/components/charts/gap-area-chart";
+import { SchoolDecisionChart } from "@/components/charts/school-decision-chart";
+import { ValueLineChart } from "@/components/charts/value-line-chart";
+import { MarketDataStatus } from "@/components/dashboard/market-data-status";
+import { AppShell } from "@/components/layout/app-shell";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { InfoTip } from "@/components/ui/info-tip";
+import { Progress } from "@/components/ui/progress";
+import {
+  buildHistoricalValueSeries,
+  calculateCatchUpMetrics,
+} from "@/lib/domain/calculations";
+import {
+  calculateDepositGuide,
+  type DepositGuideNewsInput,
+} from "@/lib/domain/depositGuide";
+import { formatDisplayDate, todayIso } from "@/lib/domain/dates";
+import { formatCurrency, formatPercent, formatShares, roundMoney } from "@/lib/domain/money";
+import { buildAiNewsDigest } from "@/lib/ai/articleAnalysis";
+import { isRelevantNewsArticle } from "@/lib/news/relevance";
+import { buildNewsDigest } from "@/lib/news/sentiment";
+import { projectCatchUp } from "@/lib/domain/projections";
+import {
+  buildSchoolDecisionCompoundTimeline,
+  buildCurrentMonthSchoolDecision,
+  findSchoolDecisionCrossDate,
+  type CurrentMonthSchoolDecision,
+} from "@/lib/domain/schoolDecision";
+import {
+  calculateStudyLoanMonthlyRepaymentAud,
+  projectFreedRepaymentIntoAapl,
+  projectStudyLoanDebtRange,
+} from "@/lib/domain/studyLoan";
+import { useTrackerData } from "@/lib/storage/useTrackerData";
+import type { CachedDailyPrice, CachedNewsArticle, CachedQuote } from "@/lib/storage/types";
+import { cn } from "@/lib/utils";
+
+function moneyUsd(value: number) {
+  return formatCurrency(value, "USD");
+}
+
+function moneyAud(value: number) {
+  return formatCurrency(value, "AUD");
+}
+
+type CodexReviewLookupResponse = {
+  codexReview?: CodexReviewDetails | null;
+};
+
+type CodexReviewDetails = {
+  appliedNewsDigest?: DepositGuideNewsInput;
+  longTermThesisSignals?: CodexReviewTheme[];
+  staleOrNoisyItems?: Array<{ reason?: string }>;
+  unresolvedThemes?: string[];
+  suggestedGuideImpact?: {
+    rationale?: string;
+    expectedAdjustmentPercent?: number;
+    recommendedDepositAud?: number;
+    depositSuggestion?: string;
+    newsSignal?: string;
+  };
+  rationale?: string;
+};
+
+type CodexReviewTheme = {
+  theme?: string;
+  direction?: string;
+  materiality?: string;
+  judgement?: string;
+};
+
+export function DashboardClient() {
+  const tracker = useTrackerData();
+  const {
+    snapshot,
+    settings,
+    saleEvent,
+    quote,
+    currentPriceUsd,
+    latestUsdToAudRate,
+    latestAudToUsdRate,
+    isLoading,
+    isRefreshing,
+    warning,
+    refreshMarketData,
+    refreshNewsArticles,
+    clearNewsCacheForSymbol,
+    clearMarketDataCacheForSymbol,
+  } = tracker;
+  const [isPreparingCodexReview, setIsPreparingCodexReview] = useState(false);
+  const [isFetchingCodexArticles, setIsFetchingCodexArticles] = useState(false);
+  const [isClearingCodexArticles, setIsClearingCodexArticles] = useState(false);
+  const [isClearingMarketCache, setIsClearingMarketCache] = useState(false);
+  const [codexReviewStatus, setCodexReviewStatus] = useState<{
+    tone: "success" | "error";
+    message: string;
+    path?: string;
+  }>();
+  const [codexReviewLookup, setCodexReviewLookup] = useState<{
+    lookupKey: string;
+    digest?: DepositGuideNewsInput;
+    review?: CodexReviewDetails;
+  }>();
+  const autoRefreshKeyRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!saleEvent) {
+      return;
+    }
+    const autoRefreshKey = [
+      saleEvent.id,
+      settings.baseTicker,
+      settings.marketDataProvider,
+    ].join(":");
+    if (autoRefreshKeyRef.current === autoRefreshKey) {
+      return;
+    }
+    autoRefreshKeyRef.current = autoRefreshKey;
+    refreshMarketData(false);
+  }, [refreshMarketData, saleEvent, settings.baseTicker, settings.marketDataProvider]);
+
+  const metrics = useMemo(
+    () =>
+      calculateCatchUpMetrics({
+        settings,
+        saleEvent,
+        contributions: snapshot.contributions,
+        trades: snapshot.trades,
+        dividends: settings.includeDividends ? snapshot.dividends : [],
+        splits: settings.includeSplits ? snapshot.splits : [],
+        currentPriceUsd,
+        latestUsdToAudRate,
+        asOfDate: todayIso(),
+      }),
+    [
+      currentPriceUsd,
+      latestUsdToAudRate,
+      saleEvent,
+      settings,
+      snapshot.contributions,
+      snapshot.dividends,
+      snapshot.splits,
+      snapshot.trades,
+    ],
+  );
+
+  const series = useMemo(
+    () =>
+      buildHistoricalValueSeries(
+        settings,
+        saleEvent,
+        snapshot.contributions,
+        snapshot.trades,
+        settings.includeDividends ? snapshot.dividends : [],
+        settings.includeSplits ? snapshot.splits : [],
+        snapshot.dailyPrices,
+        currentPriceUsd,
+        latestUsdToAudRate,
+        todayIso(),
+      ),
+    [
+      currentPriceUsd,
+      latestUsdToAudRate,
+      saleEvent,
+      settings,
+      snapshot.contributions,
+      snapshot.dailyPrices,
+      snapshot.dividends,
+      snapshot.splits,
+      snapshot.trades,
+    ],
+  );
+
+  const projection4 = projectCatchUp({
+    startDate: todayIso(),
+    months: 48,
+    monthlyContributionAud: settings.planMonthlyContributionAud,
+    audUsdRate: latestAudToUsdRate,
+    annualGrowthRatePercent: 6,
+    annualDividendYieldPercent: settings.includeDividends ? 0.5 : 0,
+    includeDividends: settings.includeDividends,
+    startingPriceUsd: currentPriceUsd,
+    hadHeldShares: metrics.equivalentSharesToday,
+    rebuildShares: metrics.currentRebuildShares,
+    rebuildCashUsd: metrics.cashBalanceUsd,
+    hadHeldDividendCashUsd: metrics.hadHeldDividendCashUsd,
+    rebuildDividendCashUsd: metrics.rebuildDividendCashUsd,
+  });
+
+  const projection5 = projectCatchUp({
+    startDate: todayIso(),
+    months: 60,
+    monthlyContributionAud: settings.planMonthlyContributionAud,
+    audUsdRate: latestAudToUsdRate,
+    annualGrowthRatePercent: 6,
+    annualDividendYieldPercent: settings.includeDividends ? 0.5 : 0,
+    includeDividends: settings.includeDividends,
+    startingPriceUsd: currentPriceUsd,
+    hadHeldShares: metrics.equivalentSharesToday,
+    rebuildShares: metrics.currentRebuildShares,
+    rebuildCashUsd: metrics.cashBalanceUsd,
+    hadHeldDividendCashUsd: metrics.hadHeldDividendCashUsd,
+    rebuildDividendCashUsd: metrics.rebuildDividendCashUsd,
+  });
+  const newsDigest = useMemo(
+    () =>
+      buildNewsDigest(
+        settings.baseTicker,
+        (snapshot.newsArticles || []).filter(
+          (article) =>
+            article.symbol === settings.baseTicker &&
+            isRelevantNewsArticle(article, settings.baseTicker),
+        ),
+      ),
+    [settings.baseTicker, snapshot.newsArticles],
+  );
+  const aiNewsDigest = useMemo(
+    () => buildAiNewsDigest(settings.baseTicker, snapshot.newsAnalyses || []),
+    [settings.baseTicker, snapshot.newsAnalyses],
+  );
+  const codexReviewMonth = todayIso().slice(0, 7);
+  const codexReviewLookupKey = `${settings.baseTicker}:${codexReviewMonth}`;
+  useEffect(() => {
+    let isActive = true;
+    const lookupKey = codexReviewLookupKey;
+    const params = new URLSearchParams({
+      symbol: settings.baseTicker,
+      reviewMonth: codexReviewMonth,
+    });
+
+    fetch(`/api/codex-review-bundle?${params.toString()}`, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) {
+          return undefined;
+        }
+        return (await response.json()) as CodexReviewLookupResponse;
+      })
+      .then((result) => {
+        if (isActive) {
+          setCodexReviewLookup({
+            lookupKey,
+            digest: result?.codexReview?.appliedNewsDigest,
+            review: result?.codexReview ?? undefined,
+          });
+        }
+      })
+      .catch(() => {
+        if (isActive) {
+          setCodexReviewLookup({ lookupKey });
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [codexReviewLookupKey, codexReviewMonth, settings.baseTicker]);
+  const codexReviewDigest =
+    codexReviewLookup?.lookupKey === codexReviewLookupKey
+      ? codexReviewLookup.digest
+      : undefined;
+  const codexReviewDetails =
+    codexReviewLookup?.lookupKey === codexReviewLookupKey
+      ? codexReviewLookup.review
+      : undefined;
+  const guideNewsDigest =
+    codexReviewDigest ??
+    (aiNewsDigest.articleCount > 0
+      ? {
+          ...aiNewsDigest,
+          analysisMode: "aiArticleAnalysis" as const,
+        }
+      : {
+          ...newsDigest,
+          analysisMode: "headlineRules" as const,
+        });
+  const codexReviewArticleLimit = 40;
+  const codexReviewArticles = useMemo(
+    () =>
+      (snapshot.newsArticles || [])
+        .filter(
+          (article) =>
+            article.symbol === settings.baseTicker &&
+            isRelevantNewsArticle(article, settings.baseTicker) &&
+            articleMonthKey(article) === codexReviewMonth,
+        )
+        .sort(compareArticlesForCodexReview),
+    [codexReviewMonth, settings.baseTicker, snapshot.newsArticles],
+  );
+  const codexReviewIncludedCount = Math.min(
+    codexReviewArticles.length,
+    codexReviewArticleLimit,
+  );
+  const cachedAaplArticles = useMemo(
+    () =>
+      (snapshot.newsArticles || [])
+        .filter((article) => article.symbol === settings.baseTicker)
+        .sort(compareArticlesForCodexReview),
+    [settings.baseTicker, snapshot.newsArticles],
+  );
+  const cachedAaplArticleDateGroups = useMemo(
+    () => groupArticlesByDate(cachedAaplArticles),
+    [cachedAaplArticles],
+  );
+  const marketCacheSummary = useMemo(
+    () =>
+      summarizeMarketCache({
+        symbol: settings.baseTicker,
+        dailyPrices: snapshot.dailyPrices,
+        quotes: snapshot.quotes,
+        includeManual:
+          settings.isDemoMode ||
+          settings.defaultPriceMode === "manual" ||
+          settings.marketDataProvider === "manual",
+      }),
+    [
+      settings.baseTicker,
+      settings.defaultPriceMode,
+      settings.isDemoMode,
+      settings.marketDataProvider,
+      snapshot.dailyPrices,
+      snapshot.quotes,
+    ],
+  );
+  const depositGuide = calculateDepositGuide({
+    planMonthlyContributionAud: settings.planMonthlyContributionAud,
+    contributions: snapshot.contributions,
+    dailyPrices: snapshot.dailyPrices,
+    currentPriceUsd,
+    latestUsdToAudRate,
+    asOfDate: todayIso(),
+    planStartDate: settings.planStartDate,
+    news: guideNewsDigest,
+  });
+  const guideReviewSummary = buildGuideReviewSummary({
+    digest: guideNewsDigest,
+    codexReview: codexReviewDetails,
+    guide: depositGuide,
+  });
+
+  const studyLoanFormulaMonthlyAud = calculateStudyLoanMonthlyRepaymentAud(
+    settings.studyLoanAnnualIncomeAud,
+  );
+  const activeStudyLoanMonthlyAud = settings.studyLoanUseIncomeFormula
+    ? studyLoanFormulaMonthlyAud
+    : settings.studyLoanMonthlyRepaymentAud;
+  const studyLoanProjectionRange = projectStudyLoanDebtRange({
+    startDate: todayIso(),
+    months: 120,
+    startingBalanceAud: settings.studyLoanBalanceAud,
+    monthlyRepaymentAud: activeStudyLoanMonthlyAud,
+    annualIndexationRatePercent: settings.studyLoanAnnualIndexationRatePercent,
+  });
+  const assumedStudyLoanPayoffAud =
+    settings.studyLoanPayoffAmountAud > 0
+      ? settings.studyLoanPayoffAmountAud
+      : settings.studyLoanBalanceAud;
+  const debtAfterPayoffAud = Math.max(
+    0,
+    settings.studyLoanBalanceAud - assumedStudyLoanPayoffAud,
+  );
+  const freedRepaymentAud =
+    settings.studyLoanRedirectFreedRepayment && debtAfterPayoffAud <= 0
+      ? activeStudyLoanMonthlyAud
+      : 0;
+  const freedRepaymentValue = projectFreedRepaymentIntoAapl({
+    startDate: todayIso(),
+    months: 60,
+    monthlyFreedCashAud: freedRepaymentAud,
+    audUsdRate: latestAudToUsdRate,
+    startingPriceUsd: currentPriceUsd,
+    annualGrowthRatePercent: 6,
+  });
+
+  if (isLoading) {
+    return (
+      <AppShell title="Dashboard" subtitle="Loading your local tracker.">
+        <Card>
+          <CardContent className="p-6 text-sm text-muted-foreground">Loading...</CardContent>
+        </Card>
+      </AppShell>
+    );
+  }
+
+  if (!saleEvent) {
+    return (
+      <AppShell
+        title="Create Your Catch-Up Tracker"
+        subtitle="Enter the original AAPL sale details or load demo data to explore the app first."
+      >
+        <Card>
+          <CardContent className="flex flex-col gap-4 p-6 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="font-medium">No sale event is saved yet.</p>
+              <p className="text-sm text-muted-foreground">
+                The Had I Held benchmark depends on the sale date, shares sold, and sale proceeds.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button asChild>
+                <Link href="/setup">
+                  Start setup <ArrowRight className="h-4 w-4" />
+                </Link>
+              </Button>
+              <Button variant="outline" onClick={tracker.loadDemo}>
+                Load demo data
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </AppShell>
+    );
+  }
+
+  const displayUsdValue = (usd: number) =>
+    settings.displayCurrency === "AUD"
+      ? moneyAud(usd * latestUsdToAudRate)
+      : moneyUsd(usd);
+  const displayAudValue = (aud: number) =>
+    settings.displayCurrency === "USD"
+      ? moneyUsd(aud * latestAudToUsdRate)
+      : moneyAud(aud);
+  const signedDisplayValue = (usd: number) => {
+    const value = displayUsdValue(Math.abs(usd));
+    if (usd < 0) {
+      return `${value} ahead`;
+    }
+    return value;
+  };
+  const rebuildAaplValueUsd = Math.max(
+    0,
+    roundMoney(metrics.rebuildMarketValueUsd + metrics.rebuildDividendCashUsd),
+  );
+  const rebuildHeadlineUsd =
+    metrics.rebuildTotalValueUsd < 0 ? rebuildAaplValueUsd : metrics.rebuildTotalValueUsd;
+  const hasTrades = snapshot.trades.length > 0;
+  const cashNeedsReview = metrics.cashBalanceUsd < -1;
+  const currentPlanText = `${displayAudValue(settings.planMonthlyContributionAud)}/month`;
+  const quoteLabel =
+    quote?.provider === "manual" ? "manual" : quote?.isDelayed ? "delayed" : "live or cached";
+  const fiveYearGapText =
+    projection5.projectedGapUsd <= 0
+      ? `${displayUsdValue(Math.abs(projection5.projectedGapUsd))} ahead`
+      : displayUsdValue(projection5.projectedGapUsd);
+  const fourYearGapText =
+    projection4.projectedGapUsd <= 0
+      ? `${displayUsdValue(Math.abs(projection4.projectedGapUsd))} ahead`
+      : displayUsdValue(projection4.projectedGapUsd);
+  const currentMonthContributionAud = calculateCurrentMonthContributionAud(
+    snapshot.contributions,
+    todayIso(),
+    latestUsdToAudRate,
+  );
+  const hasCurrentValuation = currentPriceUsd > 0 && metrics.hadHeldTotalValueUsd > 0;
+  const schoolDecisionHadHeldUsd = hasCurrentValuation
+    ? metrics.hadHeldTotalValueUsd
+    : saleEvent.netProceedsUsd;
+  const schoolDecisionRebuildAssetUsd = Math.max(0, metrics.rebuildTotalValueUsd);
+  const currentMonthSchoolDecision = buildCurrentMonthSchoolDecision({
+    asOfDate: todayIso(),
+    currentHadHeldTotalUsd: schoolDecisionHadHeldUsd,
+    originalSaleProceedsUsd: saleEvent.netProceedsUsd,
+    currentRebuildAssetValueUsd: schoolDecisionRebuildAssetUsd,
+    currentSchoolDebtAud: settings.studyLoanBalanceAud,
+    debtAfterPayoffAud,
+    totalContributionsAud: metrics.actualContributionsAud,
+    latestUsdToAudRate,
+    monthlyEducationRepaymentAud: activeStudyLoanMonthlyAud,
+    currentMonthContributionAud,
+    targetMonthContributionAud: depositGuide.recommendedDepositAud,
+    hasCurrentValuation,
+  });
+  const schoolDecisionProjectionMonths = Math.min(
+    240,
+    Math.max(180, Math.ceil(settings.studyLoanBalanceAud / Math.max(1, settings.planMonthlyContributionAud))),
+  );
+  const schoolDecisionMonthlyDepositAud = Math.max(
+    depositGuide.recommendedDepositAud,
+    freedRepaymentAud,
+  );
+  const schoolDecisionTimeline = buildSchoolDecisionCompoundTimeline({
+    startDate: todayIso(),
+    months: schoolDecisionProjectionMonths,
+    keepStartingValueAud: currentMonthSchoolDecision.keepAaplValueAud,
+    rebuildStartingValueAud: roundMoney(
+      currentMonthSchoolDecision.rebuildAssetValueAud +
+        currentMonthSchoolDecision.currentMonthDepositTopUpAud,
+    ),
+    monthlyContributionAud: schoolDecisionMonthlyDepositAud,
+    currentSchoolDebtAud: settings.studyLoanBalanceAud,
+    debtAfterPayoffAud,
+    monthlyDebtRepaymentAud: activeStudyLoanMonthlyAud,
+    annualDebtIndexationRatePercent: settings.studyLoanAnnualIndexationRatePercent,
+    annualGrowthRatePercent: 6,
+  });
+  const schoolDecisionCrossDate = findSchoolDecisionCrossDate(schoolDecisionTimeline);
+  const decisionGapAud = roundMoney(
+    currentMonthSchoolDecision.keepAaplNetAud -
+      currentMonthSchoolDecision.cashOutRebuildNetAud,
+  );
+  const decisionGapUsd =
+    latestUsdToAudRate > 0 ? roundMoney(decisionGapAud / latestUsdToAudRate) : 0;
+  const decisionGapPrimary = settings.displayCurrency === "AUD"
+    ? moneyAud(Math.abs(decisionGapAud))
+    : moneyUsd(Math.abs(decisionGapUsd));
+  const decisionGapSecondary = settings.displayCurrency === "AUD"
+    ? `About ${moneyUsd(Math.abs(decisionGapUsd))} at the latest USD/AUD rate.`
+    : `About ${moneyAud(Math.abs(decisionGapAud))} at the latest USD/AUD rate.`;
+  const isAhead = decisionGapAud <= 0;
+  const loggedProgressPercent = Math.min(Math.max(metrics.catchUpProgressPercent, 0), 100);
+  const progressForBar = loggedProgressPercent;
+  const schoolPayoffRange =
+    studyLoanProjectionRange.earliestPaidOffDate && studyLoanProjectionRange.latestPaidOffDate
+      ? `${formatDisplayDate(studyLoanProjectionRange.earliestPaidOffDate)} to ${formatDisplayDate(studyLoanProjectionRange.latestPaidOffDate)}`
+      : "Not within 10 years";
+  const logThisMonthAmountAud =
+    depositGuide.remainingThisMonthAud > 0
+      ? depositGuide.remainingThisMonthAud
+      : depositGuide.recommendedDepositAud;
+  const logThisMonthHref = `/transactions?prefill=month&amountAud=${encodeURIComponent(
+    logThisMonthAmountAud.toFixed(2),
+  )}&targetAud=${encodeURIComponent(depositGuide.recommendedDepositAud.toFixed(2))}&date=${todayIso()}`;
+
+  async function prepareMonthlyCodexReviewBundle() {
+    if (codexReviewArticles.length === 0) {
+      setCodexReviewStatus({
+        tone: "error",
+        message: `No ${settings.baseTicker} articles are cached for ${codexReviewMonth} yet.`,
+      });
+      return;
+    }
+
+    setIsPreparingCodexReview(true);
+    setCodexReviewStatus(undefined);
+
+    try {
+      const response = await fetch("/api/codex-review-bundle", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          symbol: settings.baseTicker,
+          reviewMonth: codexReviewMonth,
+          articles: codexReviewArticles,
+          analyses: snapshot.newsAnalyses || [],
+          guideContext: {
+            generatedFrom: "dashboard",
+            generatedForDate: todayIso(),
+            depositGuide: {
+              direction: depositGuide.direction,
+              confidence: depositGuide.confidence,
+              recommendedDepositAud: depositGuide.recommendedDepositAud,
+              remainingThisMonthAud: depositGuide.remainingThisMonthAud,
+              minThisMonthAud: depositGuide.minThisMonthAud,
+              maxThisMonthAud: depositGuide.maxThisMonthAud,
+              currentMonthContributedAud: depositGuide.currentMonthContributedAud,
+              reasons: depositGuide.reasons,
+              sources: depositGuide.sources,
+            },
+            marketContext: {
+              currentPriceUsd,
+              latestUsdToAudRate,
+              latestAudToUsdRate,
+              quoteProvider: quote?.provider,
+              quoteAsOf: quote?.asOf,
+            },
+            catchUpContext: {
+              catchUpGapUsd: metrics.catchUpGapUsd,
+              rebuildTotalValueUsd: metrics.rebuildTotalValueUsd,
+              hadHeldTotalValueUsd: metrics.hadHeldTotalValueUsd,
+              currentRebuildShares: metrics.currentRebuildShares,
+            },
+            newsContext: {
+              selectedDigest: guideNewsDigest,
+              headlineDigest: newsDigest,
+              aiDigest: aiNewsDigest,
+              cachedArticleCountForMonth: codexReviewArticles.length,
+              localBundleArticleLimit: codexReviewArticleLimit,
+            },
+          },
+        }),
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        path?: string;
+        includedArticleCount?: number;
+        reviewBrief?: {
+          duplicateGroupCount?: number;
+          likelyNoiseArticleCount?: number;
+          articleTextStatusCounts?: Record<string, number>;
+        };
+      };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Could not prepare the Codex review bundle.");
+      }
+
+      setCodexReviewStatus({
+        tone: "success",
+        message: `Saved ${result.includedArticleCount ?? 0} article${
+          result.includedArticleCount === 1 ? "" : "s"
+        } for ${codexReviewMonth} with a review brief (${result.reviewBrief?.duplicateGroupCount ?? 0} duplicate group${
+          result.reviewBrief?.duplicateGroupCount === 1 ? "" : "s"
+        }, ${result.reviewBrief?.likelyNoiseArticleCount ?? 0} likely-noise item${
+          result.reviewBrief?.likelyNoiseArticleCount === 1 ? "" : "s"
+        }).`,
+        path: result.path,
+      });
+    } catch (error) {
+      setCodexReviewStatus({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Could not prepare the Codex review bundle.",
+      });
+    } finally {
+      setIsPreparingCodexReview(false);
+    }
+  }
+
+  async function fetchCodexReviewArticles() {
+    setIsFetchingCodexArticles(true);
+    setCodexReviewStatus(undefined);
+
+    try {
+      const result = await refreshNewsArticles(settings.baseTicker);
+      setCodexReviewLookup({ lookupKey: codexReviewLookupKey });
+      setCodexReviewStatus({
+        tone: "success",
+        message: `Fetched ${result.articleCount} ${settings.baseTicker} article${
+          result.articleCount === 1 ? "" : "s"
+        } from the free news feeds. Prepare a review after the cache looks right.`,
+      });
+    } catch (error) {
+      setCodexReviewStatus({
+        tone: "error",
+        message: error instanceof Error ? error.message : `Could not fetch ${settings.baseTicker} articles.`,
+      });
+    } finally {
+      setIsFetchingCodexArticles(false);
+    }
+  }
+
+  async function clearCachedCodexArticles() {
+    if (
+      cachedAaplArticles.length > 0 &&
+      !window.confirm(
+        `Remove all cached ${settings.baseTicker} articles and saved article analyses from this browser?`,
+      )
+    ) {
+      return;
+    }
+
+    setIsClearingCodexArticles(true);
+    setCodexReviewStatus(undefined);
+
+    try {
+      const result = await clearNewsCacheForSymbol(settings.baseTicker);
+      setCodexReviewLookup({ lookupKey: codexReviewLookupKey });
+      setCodexReviewStatus({
+        tone: "success",
+        message: `Removed ${result.articlesDeleted} cached ${settings.baseTicker} article${
+          result.articlesDeleted === 1 ? "" : "s"
+        } and ${result.analysesDeleted} saved analysis record${
+          result.analysesDeleted === 1 ? "" : "s"
+        } from local storage.`,
+      });
+    } catch (error) {
+      setCodexReviewStatus({
+        tone: "error",
+        message: error instanceof Error ? error.message : `Could not clear ${settings.baseTicker} articles.`,
+      });
+    } finally {
+      setIsClearingCodexArticles(false);
+    }
+  }
+
+  async function clearMarketCacheAndRefresh() {
+    if (
+      !window.confirm(
+        `Clear cached ${settings.baseTicker} quotes, price history, dividends, and splits from this browser, then fetch them again?`,
+      )
+    ) {
+      return;
+    }
+
+    setIsClearingMarketCache(true);
+
+    try {
+      await clearMarketDataCacheForSymbol(settings.baseTicker);
+      await refreshMarketData(true);
+    } finally {
+      setIsClearingMarketCache(false);
+    }
+  }
+
+  return (
+    <AppShell
+      title="Dashboard"
+      subtitle="The plain-English view of whether your AAPL rebuild is catching the Had I Held benchmark."
+    >
+      <div className="space-y-5">
+        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.85fr)]">
+          <Card
+            className={cn(
+              isAhead ? "border-accent bg-accent/30" : "border-[#f4cf76] bg-[#fff8e7] dark:bg-[#33280f]",
+            )}
+          >
+            <CardContent className="space-y-6 p-5 md:p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-3">
+                  <Badge variant={isAhead ? "success" : "warning"}>
+                    {isAhead ? "Rebuild ahead" : "Rebuild catching up"}
+                  </Badge>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium uppercase text-muted-foreground">
+                        {isAhead ? "School-decision advantage" : "School-decision gap"}
+                      </p>
+                      <InfoTip title="School-decision gap">
+                        <p>
+                          This is the gap between the debt-adjusted school-decision paths:
+                          Keep AAPL while making the monthly school repayment versus pay off the
+                          debt and rebuild with this month&apos;s guided AAPL deposit. It is different
+                          from the AAPL-only catch-up gap in the detailed numbers.
+                        </p>
+                      </InfoTip>
+                    </div>
+                    <h2 className="mt-2 text-4xl font-semibold tracking-normal md:text-5xl">
+                      {decisionGapPrimary}
+                    </h2>
+                    <p className="mt-2 text-base text-muted-foreground">
+                      {decisionGapSecondary}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border bg-background/80 p-4 lg:min-w-[260px]">
+                  <p className="text-sm font-medium text-muted-foreground">Progress</p>
+                  <p className="mt-1 text-3xl font-semibold">
+                    {formatPercent(loggedProgressPercent)}%
+                  </p>
+                  <Progress className="mt-3" value={progressForBar} />
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    Logged rebuild value compared with the Had I Held benchmark.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <HeroStat
+                  label="Current plan"
+                  value={currentPlanText}
+                  note="AUD contributions are converted to USD for the comparison."
+                />
+                <HeroStat
+                  label="Suggested deposit this month"
+                  value={displayAudValue(depositGuide.recommendedDepositAud)}
+                  note={`${displayAudValue(depositGuide.minThisMonthAud)} to ${displayAudValue(depositGuide.maxThisMonthAud)} guardrail range.`}
+                  tip="This is the deposit guide amount for the current month. It starts from your normal plan and then applies the guardrail."
+                />
+                <HeroStat
+                  label="Still to log"
+                  value={displayAudValue(depositGuide.remainingThisMonthAud)}
+                  note="Based on contributions already dated this month."
+                  tip="This is the remaining amount to log to reach the suggested deposit for this month."
+                />
+              </div>
+
+              <div className="flex flex-col gap-3 border-t pt-5 sm:flex-row">
+                <Button asChild>
+                  <Link href={logThisMonthHref}>
+                    Log this month <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </Button>
+                <Button asChild variant="outline">
+                  <Link href="/projections">
+                    Open projections <BarChart3 className="h-4 w-4" />
+                  </Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ListChecks className="h-5 w-5 text-primary" />
+                What Needs Attention
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <AttentionItem
+                icon={<Wallet className="h-4 w-4" />}
+                title={hasTrades ? "Monthly buy tracking" : "Start with your first buy"}
+                text={
+                  hasTrades
+                    ? `${formatShares(metrics.currentRebuildShares)} AAPL shares are currently logged in the Rebuild Portfolio.`
+                    : "Add a contribution and either enter shares bought or let the app estimate shares from the AAPL price."
+                }
+                tone={hasTrades ? "ok" : "action"}
+              />
+              <AttentionItem
+                icon={<TrendingUp className="h-4 w-4" />}
+                title="This month deposit guide"
+                text={
+                  `${guideLabel(depositGuide.direction)}: target ${displayAudValue(depositGuide.recommendedDepositAud)} this month, with ${displayAudValue(depositGuide.remainingThisMonthAud)} left to log.`
+                }
+                tone={depositGuide.direction === "hold" ? "ok" : "action"}
+              />
+              <AttentionItem
+                icon={<CircleDollarSign className="h-4 w-4" />}
+                title="Cash balance"
+                text={
+                  cashNeedsReview
+                    ? "Logged buys are greater than logged funding. Add a matching contribution or check the trade cost."
+                    : `${displayUsdValue(metrics.cashBalanceUsd)} available after logged contributions and trades.`
+                }
+                tone={cashNeedsReview ? "action" : "ok"}
+              />
+            </CardContent>
+          </Card>
+        </section>
+
+        <section className="grid gap-4 lg:grid-cols-3">
+          <SummaryTile
+            icon={<Landmark className="h-5 w-5" />}
+            title="Had I Held"
+            value={displayUsdValue(metrics.hadHeldTotalValueUsd)}
+            description="What the original AAPL position is worth today."
+            rows={[
+              ["Equivalent shares", formatShares(metrics.equivalentSharesToday)],
+              ["AAPL price", moneyUsd(currentPriceUsd)],
+              ["Dividends included", displayUsdValue(metrics.hadHeldDividendCashUsd)],
+            ]}
+          />
+          <SummaryTile
+            icon={<Wallet className="h-5 w-5" />}
+            title="Rebuild Portfolio"
+            value={displayUsdValue(rebuildHeadlineUsd)}
+            description={
+              metrics.cashBalanceUsd < 0
+                ? "Your AAPL value. Funding shortfall is shown below."
+                : "Your logged AAPL rebuild, cash, and dividends."
+            }
+            rows={[
+              ["Shares owned", formatShares(metrics.currentRebuildShares)],
+              ["Total contributed", displayUsdValue(metrics.totalContributionsUsd)],
+              ["Market value", displayUsdValue(metrics.rebuildMarketValueUsd)],
+              ["Cash balance", displayUsdValue(metrics.cashBalanceUsd)],
+            ]}
+          />
+          <SummaryTile
+            icon={<TrendingUp className="h-5 w-5" />}
+            title="This Month Deposit Guide"
+            value={displayAudValue(depositGuide.recommendedDepositAud)}
+            description={`Remaining this month: ${displayAudValue(depositGuide.remainingThisMonthAud)}.`}
+            rows={[
+              ["Guide", guideLabel(depositGuide.direction)],
+              ["Monthly range", `${displayAudValue(depositGuide.minThisMonthAud)} to ${displayAudValue(depositGuide.maxThisMonthAud)}`],
+              ["Flex bank", displayAudValue(depositGuide.bankedFlexAud)],
+            ]}
+          />
+        </section>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-primary" />
+              This Month Deposit Guide
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+              <PlainMetric
+                label="Guide"
+                value={guideLabel(depositGuide.direction)}
+                note={`${depositGuide.confidence} confidence, ${formatSignedPercent(depositGuide.adjustmentPercent)} vs neutral.`}
+                tip="This is the app's plain suggestion for this month only. Confidence affects how much of the guardrail the guide uses."
+              />
+              <PlainMetric
+                label="Target this month"
+                value={displayAudValue(depositGuide.recommendedDepositAud)}
+                note={`${displayAudValue(depositGuide.remainingThisMonthAud)} left after current-month deposits.`}
+                tip="This is the amount the guide suggests for this calendar month. If you already logged some of it, the app shows only what is left."
+              />
+              <PlainMetric
+                label="Allowed range"
+                value={`${displayAudValue(depositGuide.minThisMonthAud)} to ${displayAudValue(depositGuide.maxThisMonthAud)}`}
+                note={`${formatPercent(depositGuide.flexPercent * 100, 0)}% guardrail, used continuously.`}
+                tip="This is the guardrail. The app can recommend any amount inside this range, not only the endpoints."
+              />
+              <PlainMetric
+                label="Current month logged"
+                value={displayAudValue(depositGuide.currentMonthContributedAud)}
+                note="Only contributions dated this month are counted here."
+                tip="This ignores older contributions. It answers: how much have you already put in for the current month?"
+              />
+              <PlainMetric
+                label="News signal"
+                value={newsSignalLabel(guideNewsDigest.signal)}
+                note={`${guideNewsDigest.articleCount} ${newsArticleLabel(guideNewsDigest.analysisMode)}${guideNewsDigest.articleCount === 1 ? "" : "s"} from ${newsPublisherText(guideNewsDigest)}.`}
+                tip="This reads recent free RSS headlines. When OpenAI API access is configured, the app analyzes article text with gpt-5.4-mini and escalates important or uncertain articles to gpt-5.4 before folding the digest into this month's guide."
+              />
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-lg border bg-background p-4">
+                <p className="text-sm font-medium">Why this guide?</p>
+                <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+                  {depositGuide.reasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-lg border bg-background p-4">
+                <p className="text-sm font-medium">Review summary</p>
+                <div className="mt-3 grid gap-3">
+                  {guideReviewSummary.map((section) => (
+                    <div key={section.label} className="rounded-md border bg-muted/30 p-3">
+                      <p className={cn("text-xs font-semibold uppercase tracking-normal", section.className)}>
+                        {section.label}
+                      </p>
+                      <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+                        {section.items.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border bg-muted p-4 text-sm text-muted-foreground">
+                The guide uses a 20% guardrail on your {currentPlanText} plan. Confidence changes
+                how far the guide leans higher, lower, or steady inside that range. If you
+                intentionally go lower, up to {displayAudValue(depositGuide.baseFlexAud)} per month is
+                banked for later months. Free RSS headlines are included when available. If OpenAI
+                API access is configured, article text is analyzed once and cached; otherwise the
+                guide stays anchored to headline scoring, price history, and budget flex.
+              </div>
+              <div className="rounded-lg border bg-background p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Monthly Codex review</p>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {codexReviewIncludedCount} of {codexReviewArticles.length} cached{" "}
+                      {settings.baseTicker} article{codexReviewArticles.length === 1 ? "" : "s"}{" "}
+                      ready for {codexReviewMonth}. {cachedAaplArticles.length} total cached{" "}
+                      {settings.baseTicker} article{cachedAaplArticles.length === 1 ? "" : "s"}.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 sm:justify-end">
+                    <Button
+                      className="shrink-0"
+                      disabled={isFetchingCodexArticles || isPreparingCodexReview || isClearingCodexArticles}
+                      onClick={fetchCodexReviewArticles}
+                      size="sm"
+                      variant="outline"
+                    >
+                      {isFetchingCodexArticles ? "Fetching..." : `Fetch ${settings.baseTicker} articles`}
+                      <RefreshCw className={cn("h-4 w-4", isFetchingCodexArticles && "animate-spin")} />
+                    </Button>
+                    <Button
+                      className="shrink-0"
+                      disabled={
+                        isPreparingCodexReview ||
+                        isFetchingCodexArticles ||
+                        isClearingCodexArticles ||
+                        codexReviewArticles.length === 0
+                      }
+                      onClick={prepareMonthlyCodexReviewBundle}
+                      size="sm"
+                      variant="outline"
+                    >
+                      {isPreparingCodexReview ? "Preparing..." : "Prepare review"}
+                      <FileText className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      className="shrink-0"
+                      disabled={
+                        isClearingCodexArticles ||
+                        isFetchingCodexArticles ||
+                        isPreparingCodexReview ||
+                        cachedAaplArticles.length === 0
+                      }
+                      onClick={clearCachedCodexArticles}
+                      size="sm"
+                      variant="destructive"
+                    >
+                      {isClearingCodexArticles
+                        ? "Removing..."
+                        : `Remove all cached ${settings.baseTicker}`}
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+                <details className="mt-3 rounded-md border bg-muted/20 text-sm">
+                  <summary className="cursor-pointer list-none p-3 font-medium">
+                    Cached articles by date ({cachedAaplArticles.length} total)
+                  </summary>
+                  <div className="border-t p-3">
+                    {cachedAaplArticleDateGroups.length > 0 ? (
+                      <div className="space-y-2">
+                        <p className="text-xs text-muted-foreground">
+                          Grouped by published date when available, otherwise collected or cached date.
+                        </p>
+                        {cachedAaplArticleDateGroups.map((group) => (
+                          <div
+                            className="flex items-start justify-between gap-3 rounded-md border bg-background px-3 py-2"
+                            key={group.dateKey}
+                          >
+                            <div>
+                              <p className="font-medium">{group.label}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {group.publisherCount} publisher{group.publisherCount === 1 ? "" : "s"}
+                                {group.providerCount > 0
+                                  ? ` across ${group.providerCount} feed${group.providerCount === 1 ? "" : "s"}`
+                                  : ""}
+                              </p>
+                            </div>
+                            <p className="shrink-0 text-sm font-semibold">
+                              {group.count} article{group.count === 1 ? "" : "s"}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-muted-foreground">
+                        No cached {settings.baseTicker} articles in local storage.
+                      </p>
+                    )}
+                  </div>
+                </details>
+                {codexReviewStatus ? (
+                  <div
+                    aria-live="polite"
+                    className={cn(
+                      "mt-3 rounded-md border px-3 py-2 text-sm",
+                      codexReviewStatus.tone === "success"
+                        ? "border-accent bg-accent/30 text-accent-foreground"
+                        : "border-destructive/30 bg-destructive/10 text-destructive",
+                    )}
+                  >
+                    <p>{codexReviewStatus.message}</p>
+                    {codexReviewStatus.path ? (
+                      <p className="mt-1 break-all text-xs text-muted-foreground">
+                        {codexReviewStatus.path}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {settings.studyLoanEnabled ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <GraduationCap className="h-5 w-5 text-primary" />
+                School Repayment Decision
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="max-w-3xl text-sm text-muted-foreground">
+                This compares two paths: cashing out AAPL to clear the school repayment and
+                rebuild, versus keeping the original AAPL position while the school debt is paid
+                down from income.
+              </p>
+              <SchoolMonthSummary
+                decision={currentMonthSchoolDecision}
+                formatAud={displayAudValue}
+              />
+              <div className="grid gap-3 md:grid-cols-3">
+                <PlainMetric
+                  label="Current month AAPL target"
+                  value={displayAudValue(depositGuide.recommendedDepositAud)}
+                  note={`Guardrail range ${displayAudValue(depositGuide.minThisMonthAud)} to ${displayAudValue(depositGuide.maxThisMonthAud)}.`}
+                  tip="This is the suggested amount to put into AAPL this month. It is the cash-flow amount used in the school-decision comparison."
+                />
+                <PlainMetric
+                  label="Projected paid-off range"
+                  value={schoolPayoffRange}
+                  note={`Indexation range ${studyLoanProjectionRange.lowRatePercent.toFixed(1)}% to ${studyLoanProjectionRange.highRatePercent.toFixed(1)}%.`}
+                  tip="This is not one exact date. It is a safe range because the debt can be indexed each June, and future indexation is only an estimate."
+                />
+                <PlainMetric
+                  label="Freed repayment into AAPL"
+                  value={displayAudValue(freedRepaymentValue.futureValueAud)}
+                  note={`${displayAudValue(freedRepaymentAud)}/month redirected in the model.`}
+                  tip="If clearing the school debt stops the monthly repayment, this estimates what that freed-up money could become if it goes into AAPL instead."
+                />
+              </div>
+              <DetailsPanel
+                title="School-decision break-even graph"
+                description={
+                  schoolDecisionCrossDate
+                    ? `The debt-adjusted paths break even around ${formatDisplayDate(schoolDecisionCrossDate)} in this model.`
+                    : "The debt-adjusted rebuild path does not catch the keep-AAPL path in this model window."
+                }
+              >
+                <div className="space-y-4">
+                  <SchoolDecisionChart data={schoolDecisionTimeline} />
+                  <p className="text-sm text-muted-foreground">
+                    Estimate uses a cash-flow-adjusted AAPL opportunity gap, a 6.0% annual
+                    AAPL growth assumption, current AUD/USD conversion, and the school-debt
+                    repayment and indexation settings saved in this tracker.
+                  </p>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <PlainMetric
+                      label="Keep AAPL line"
+                      value={displayAudValue(schoolDecisionTimeline.at(-1)?.keepAaplNetAud ?? 0)}
+                      note="AAPL value after the monthly school repayment."
+                      tip="This line assumes you kept the original AAPL position and continued paying the school debt from income. It does not subtract the full loan principal from the AAPL value."
+                    />
+                    <PlainMetric
+                      label="Pay off + rebuild line"
+                      value={displayAudValue(schoolDecisionTimeline.at(-1)?.cashOutRebuildNetAud ?? 0)}
+                      note={`${displayAudValue(schoolDecisionMonthlyDepositAud)}/month into AAPL in the model.`}
+                      tip="This line assumes the payoff is applied first, then monthly AAPL deposits rebuild from your current logged value."
+                    />
+                    <PlainMetric
+                      label="School-decision break-even"
+                      value={schoolDecisionCrossDate ? formatDisplayDate(schoolDecisionCrossDate) : "Not shown"}
+                      note="Debt-adjusted date, not the AAPL-only catch-up date."
+                      tip="This is the first month where the pay-off-and-rebuild line is at or above the keep-AAPL line. It can move a lot if AAPL growth, FX, or contributions change."
+                    />
+                  </div>
+                </div>
+              </DetailsPanel>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Button asChild variant="outline">
+                  <Link href="/projections">
+                    Compare scenarios <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link href="/settings">Edit assumptions</Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        <DetailsPanel
+          title="Detailed AAPL Numbers"
+          description="Open this when you want the formula-level breakdown."
+        >
+          <div className="grid gap-3 lg:grid-cols-2">
+            <DetailRow label="Original shares sold" value={formatShares(saleEvent.sharesSold)} />
+            <DetailRow label="Sale date" value={formatDisplayDate(saleEvent.saleDate)} />
+            <DetailRow label="Equivalent shares today" value={formatShares(metrics.equivalentSharesToday)} />
+            <DetailRow label="Had I Held market value" value={displayUsdValue(metrics.hadHeldMarketValueUsd)} />
+            <DetailRow label="Had I Held dividends" value={displayUsdValue(metrics.hadHeldDividendCashUsd)} />
+            <DetailRow label="Total Had I Held" value={displayUsdValue(metrics.hadHeldTotalValueUsd)} strong />
+            <DetailRow label="Rebuild shares" value={formatShares(metrics.currentRebuildShares)} />
+            <DetailRow label="Rebuild market value" value={displayUsdValue(metrics.rebuildMarketValueUsd)} />
+            <DetailRow label="Rebuild dividends" value={displayUsdValue(metrics.rebuildDividendCashUsd)} />
+            <DetailRow label="Cash balance" value={displayUsdValue(metrics.cashBalanceUsd)} />
+            <DetailRow label="Total rebuild value" value={displayUsdValue(metrics.rebuildTotalValueUsd)} strong />
+            <DetailRow label="AAPL-only Catch-Up Gap" value={signedDisplayValue(metrics.catchUpGapUsd)} strong />
+            <DetailRow label="Deposit progress" value={`${formatPercent(metrics.depositProgressPercent)}%`} />
+            <DetailRow label="Portfolio gain" value={displayUsdValue(metrics.portfolioGainUsd)} />
+            <DetailRow label="Opportunity cost since sale" value={displayUsdValue(metrics.opportunityCostSinceSaleUsd)} />
+            <DetailRow label="Plan target date" value={formatDisplayDate(metrics.planTargetDate)} />
+          </div>
+        </DetailsPanel>
+
+        <DetailsPanel
+          title="Charts"
+          description="Useful when you want to inspect the trend rather than the answer."
+        >
+          <div className="grid gap-5 xl:grid-cols-2">
+            <ChartBlock title="Had I Held vs Rebuild Portfolio">
+              <ValueLineChart data={series} />
+            </ChartBlock>
+            <ChartBlock title="AAPL-only Catch-Up Gap Over Time">
+              <GapAreaChart data={series} />
+            </ChartBlock>
+            <ChartBlock title="Contributions vs Portfolio Gain">
+              <ContributionBarChart
+                contributionsUsd={metrics.totalContributionsUsd}
+                gainUsd={metrics.portfolioGainUsd}
+              />
+            </ChartBlock>
+            <ChartBlock title="Projection Snapshot">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <PlainMetric
+                  label="4-year AAPL-only gap"
+                  value={fourYearGapText}
+                  note={projection4.catchUpDate ? `AAPL-only catch-up date ${formatDisplayDate(projection4.catchUpDate)}.` : "No AAPL-only catch-up date in this window."}
+                />
+                <PlainMetric
+                  label="5-year AAPL-only gap"
+                  value={fiveYearGapText}
+                  note={projection5.catchUpDate ? `AAPL-only catch-up date ${formatDisplayDate(projection5.catchUpDate)}.` : "No AAPL-only catch-up date in this window."}
+                />
+              </div>
+            </ChartBlock>
+          </div>
+        </DetailsPanel>
+
+        <DetailsPanel
+          title="Market Data and Assumptions"
+          description={`AAPL price is ${quoteLabel}; refresh only when you need a current value.`}
+        >
+          <div className="space-y-4">
+            <MarketDataStatus
+              quote={quote}
+              priceUsd={currentPriceUsd}
+              isRefreshing={isRefreshing}
+              warning={warning}
+              onRefresh={() => refreshMarketData(true)}
+            />
+            <MarketCacheDebugger
+              isBusy={isClearingMarketCache}
+              onClearAndRefresh={clearMarketCacheAndRefresh}
+              summary={marketCacheSummary}
+              symbol={settings.baseTicker}
+            />
+            <div className="grid gap-3 md:grid-cols-3">
+              <Factor
+                icon={<CircleDollarSign className="h-4 w-4" />}
+                text="AAPL trades in USD, so the main comparison stays USD-based."
+              />
+              <Factor
+                icon={<TrendingUp className="h-4 w-4" />}
+                text="If AAPL rises quickly, the Had I Held benchmark rises too."
+              />
+              <Factor
+                icon={<Wallet className="h-4 w-4" />}
+                text="AUD contributions depend on the AUD/USD rate used on each contribution date."
+              />
+            </div>
+          </div>
+        </DetailsPanel>
+      </div>
+    </AppShell>
+  );
+}
+
+function HeroStat({
+  label,
+  value,
+  note,
+  tip,
+}: {
+  label: string;
+  value: string;
+  note: string;
+  tip?: string;
+}) {
+  return (
+    <div className="rounded-lg border bg-background/80 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm text-muted-foreground">{label}</p>
+        {tip ? (
+          <InfoTip title={label}>
+            <p>{tip}</p>
+          </InfoTip>
+        ) : null}
+      </div>
+      <p className="mt-1 text-xl font-semibold">{value}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{note}</p>
+    </div>
+  );
+}
+
+function articleMonthKey(article: {
+  collectedAt?: string;
+  cachedAt?: string;
+  publishedAt?: string;
+}) {
+  return articleReviewTimestamp(article).slice(0, 7);
+}
+
+function groupArticlesByDate(articles: CachedNewsArticle[]) {
+  const groups = new Map<
+    string,
+    {
+      dateKey: string;
+      label: string;
+      count: number;
+      publishers: Set<string>;
+      providers: Set<string>;
+    }
+  >();
+
+  for (const article of articles) {
+    const timestamp = articleDisplayTimestamp(article);
+    const dateKey = timestamp ? timestamp.slice(0, 10) : "undated";
+    const existing = groups.get(dateKey);
+    if (existing) {
+      existing.count += 1;
+      existing.publishers.add(article.source);
+      existing.providers.add(article.provider);
+      continue;
+    }
+    groups.set(dateKey, {
+      dateKey,
+      label: dateKey === "undated" ? "Undated" : formatDisplayDate(dateKey),
+      count: 1,
+      publishers: new Set([article.source]),
+      providers: new Set([article.provider]),
+    });
+  }
+
+  return Array.from(groups.values())
+    .sort((left, right) => right.dateKey.localeCompare(left.dateKey))
+    .map((group) => ({
+      dateKey: group.dateKey,
+      label: group.label,
+      count: group.count,
+      publisherCount: group.publishers.size,
+      providerCount: group.providers.size,
+    }));
+}
+
+function summarizeMarketCache({
+  symbol,
+  dailyPrices,
+  quotes,
+  includeManual,
+}: {
+  symbol: string;
+  dailyPrices: CachedDailyPrice[];
+  quotes: CachedQuote[];
+  includeManual: boolean;
+}) {
+  const normalizedSymbol = symbol.toUpperCase();
+  const allSymbolPrices = dailyPrices.filter((price) => price.symbol === normalizedSymbol);
+  const usablePrices = allSymbolPrices
+    .filter((price) => includeManual || price.provider !== "manual")
+    .sort((left, right) => left.date.localeCompare(right.date));
+  const latestPrice = usablePrices.at(-1);
+  const latestQuote = [...quotes]
+    .filter((quote) => quote.symbol === normalizedSymbol)
+    .sort((left, right) => (right.asOf || "").localeCompare(left.asOf || ""))[0];
+  const providers = Array.from(new Set(usablePrices.map((price) => price.provider))).sort();
+
+  return {
+    allPriceCount: allSymbolPrices.length,
+    usablePriceCount: usablePrices.length,
+    latestPriceDate: latestPrice?.date,
+    latestPriceProvider: latestPrice?.provider,
+    latestPriceUsd: latestPrice?.adjustedCloseUsd ?? latestPrice?.closeUsd,
+    latestQuoteAsOf: latestQuote?.asOf,
+    latestQuoteProvider: latestQuote?.provider,
+    providers,
+  };
+}
+
+function compareArticlesForCodexReview(
+  left: { signalScore: number; collectedAt?: string; cachedAt?: string; publishedAt?: string },
+  right: { signalScore: number; collectedAt?: string; cachedAt?: string; publishedAt?: string },
+) {
+  const scoreDiff = Math.abs(right.signalScore) - Math.abs(left.signalScore);
+  if (scoreDiff !== 0) {
+    return scoreDiff;
+  }
+  return articleReviewTimestamp(right).localeCompare(articleReviewTimestamp(left));
+}
+
+function articleReviewTimestamp(article: {
+  collectedAt?: string;
+  cachedAt?: string;
+  publishedAt?: string;
+}) {
+  return article.collectedAt || article.cachedAt || article.publishedAt || "";
+}
+
+function articleDisplayTimestamp(article: {
+  collectedAt?: string;
+  cachedAt?: string;
+  publishedAt?: string;
+}) {
+  return article.publishedAt || article.collectedAt || article.cachedAt || "";
+}
+
+function buildGuideReviewSummary({
+  digest,
+  codexReview,
+  guide,
+}: {
+  digest: DepositGuideNewsInput;
+  codexReview?: CodexReviewDetails;
+  guide: ReturnType<typeof calculateDepositGuide>;
+}) {
+  const thesisSignals = codexReview?.longTermThesisSignals ?? [];
+  const positiveItems = thesisSignals
+    .filter((signal) => signal.direction === "positive")
+    .map(formatThesisSignal)
+    .slice(0, 2);
+  const negativeItems = thesisSignals
+    .filter((signal) => signal.direction === "negative")
+    .map(formatThesisSignal)
+    .slice(0, 2);
+  const neutralItems = [
+    ...thesisSignals
+      .filter((signal) => signal.direction !== "positive" && signal.direction !== "negative")
+      .map(formatThesisSignal),
+    ...(codexReview?.staleOrNoisyItems ?? []).map((item) => item.reason).filter(isPresent),
+  ].slice(0, 3);
+
+  const scoreItems = [
+    `Guide score ${guide.signalScore.toFixed(
+      2,
+    )} is not a percent. 0.00 is neutral; positive leans higher, negative leans lower, and about +/-2.00 uses the normal monthly guardrail before any banked-flex cap. This score produced ${formatSignedPercent(
+      guide.adjustmentPercent,
+    )} vs the neutral plan and a target of ${formatCurrency(guide.recommendedDepositAud, "AUD")}.`,
+    codexReview?.suggestedGuideImpact?.rationale ?? codexReview?.rationale,
+  ].filter(isPresent);
+
+  return [
+    {
+      label: `Positives (${digest.positiveArticleCount ?? 0})`,
+      className: "text-emerald-700 dark:text-emerald-300",
+      items:
+        positiveItems.length > 0
+          ? positiveItems
+          : [`${digest.positiveArticleCount ?? 0} positive article signals were counted.`],
+    },
+    {
+      label: `Negatives (${digest.negativeArticleCount ?? 0})`,
+      className: "text-destructive",
+      items:
+        negativeItems.length > 0
+          ? negativeItems
+          : [`${digest.negativeArticleCount ?? 0} negative article signals were counted.`],
+    },
+    {
+      label: `Neutral / Mixed (${digest.neutralArticleCount ?? 0})`,
+      className: "text-muted-foreground",
+      items:
+        neutralItems.length > 0
+          ? neutralItems
+          : [`${digest.neutralArticleCount ?? 0} neutral article signals were counted.`],
+    },
+    {
+      label: "Guide Score",
+      className: "text-primary",
+      items: scoreItems.length > 0 ? scoreItems : guide.reasons.slice(0, 2),
+    },
+  ];
+}
+
+function formatThesisSignal(signal: CodexReviewTheme) {
+  const materiality = signal.materiality ? `${signal.materiality} impact` : "reviewed";
+  return `${signal.theme ?? "Reviewed theme"} (${materiality}): ${
+    signal.judgement ?? "No extra judgement was saved for this theme."
+  }`;
+}
+
+function isPresent(value: string | undefined): value is string {
+  return Boolean(value?.trim());
+}
+
+function guideLabel(direction: "increase" | "hold" | "decrease") {
+  if (direction === "increase") {
+    return "Lean higher";
+  }
+  if (direction === "decrease") {
+    return "Lean lower";
+  }
+  return "Keep steady";
+}
+
+function newsSignalLabel(signal: "positive" | "neutral" | "negative") {
+  if (signal === "positive") {
+    return "Positive";
+  }
+  if (signal === "negative") {
+    return "Negative";
+  }
+  return "Neutral";
+}
+
+function newsArticleLabel(analysisMode: DepositGuideNewsInput["analysisMode"]) {
+  if (analysisMode === "aiArticleAnalysis") {
+    return "AI-analyzed article";
+  }
+  if (analysisMode === "codexReview") {
+    return "Codex-reviewed article";
+  }
+  return "recent headline";
+}
+
+function newsPublisherText(digest: DepositGuideNewsInput) {
+  const count = digest.publisherCount ?? digest.providerCount;
+  if (count <= 0) {
+    return "no publishers";
+  }
+  if (count === 1) {
+    return "1 publisher";
+  }
+  return `${count} publishers`;
+}
+
+function formatSignedPercent(value: number) {
+  if (Math.abs(value) < 0.01) {
+    return "0.00%";
+  }
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function calculateCurrentMonthContributionAud(
+  contributions: Array<{ date: string; currencyEntered: string; amount: number; amountUsd: number }>,
+  asOfDate: string,
+  latestUsdToAudRate: number,
+) {
+  const month = asOfDate.slice(0, 7);
+  return roundMoney(
+    contributions
+      .filter((contribution) => contribution.date.slice(0, 7) === month)
+      .reduce((total, contribution) => {
+        if (contribution.currencyEntered === "AUD") {
+          return total + contribution.amount;
+        }
+        return total + contribution.amountUsd * latestUsdToAudRate;
+      }, 0),
+  );
+}
+
+function AttentionItem({
+  icon,
+  title,
+  text,
+  tone,
+}: {
+  icon: ReactNode;
+  title: string;
+  text: string;
+  tone: "ok" | "action";
+}) {
+  return (
+    <div className="flex gap-3 rounded-lg border bg-background p-3">
+      <div
+        className={cn(
+          "mt-0.5 rounded-md p-1.5",
+          tone === "ok" ? "bg-accent text-accent-foreground" : "bg-[#fff3cf] text-[#765100]",
+        )}
+      >
+        {tone === "ok" ? <CheckCircle2 className="h-4 w-4" /> : icon}
+      </div>
+      <div>
+        <p className="text-sm font-medium">{title}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{text}</p>
+      </div>
+    </div>
+  );
+}
+
+function SummaryTile({
+  icon,
+  title,
+  value,
+  description,
+  rows,
+}: {
+  icon: ReactNode;
+  title: string;
+  value: string;
+  description: string;
+  rows: Array<[string, string]>;
+}) {
+  return (
+    <Card>
+      <CardContent className="p-5">
+        <div className="flex items-start gap-3">
+          <div className="rounded-md bg-muted p-2 text-primary">{icon}</div>
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-muted-foreground">{title}</p>
+            <p className="mt-1 text-2xl font-semibold tracking-normal">{value}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+          </div>
+        </div>
+        <div className="mt-4 space-y-2 border-t pt-4">
+          {rows.map(([label, rowValue]) => (
+            <div key={label} className="flex items-start justify-between gap-3 text-sm">
+              <span className="text-muted-foreground">{label}</span>
+              <span className="text-right font-medium">{rowValue}</span>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PlainMetric({
+  label,
+  value,
+  note,
+  tip,
+}: {
+  label: string;
+  value: string;
+  note?: string;
+  tip?: string;
+}) {
+  return (
+    <div className="rounded-lg border bg-background p-4">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm text-muted-foreground">{label}</p>
+        {tip ? (
+          <InfoTip title={label}>
+            <p>{tip}</p>
+          </InfoTip>
+        ) : null}
+      </div>
+      <p className="mt-1 text-xl font-semibold">{value}</p>
+      {note ? <p className="mt-1 text-xs text-muted-foreground">{note}</p> : null}
+    </div>
+  );
+}
+
+function MarketCacheDebugger({
+  symbol,
+  summary,
+  isBusy,
+  onClearAndRefresh,
+}: {
+  symbol: string;
+  summary: ReturnType<typeof summarizeMarketCache>;
+  isBusy: boolean;
+  onClearAndRefresh: () => void;
+}) {
+  const hasEnoughHistory = summary.usablePriceCount >= 7;
+
+  return (
+    <div className="rounded-lg border bg-background p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-sm font-medium">Market cache debugger</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Shows the price-history cache used by the deposit guide in this browser.
+          </p>
+        </div>
+        <Button
+          disabled={isBusy}
+          onClick={onClearAndRefresh}
+          size="sm"
+          variant="outline"
+        >
+          <RefreshCw className={cn("h-4 w-4", isBusy && "animate-spin")} />
+          Clear and refresh market cache
+        </Button>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <CacheDebugStat
+          label="Usable price points"
+          note={
+            hasEnoughHistory
+              ? `${summary.allPriceCount} total cached ${symbol} price rows.`
+              : `Needs at least 7; ${summary.allPriceCount} total cached ${symbol} price rows.`
+          }
+          value={String(summary.usablePriceCount)}
+        />
+        <CacheDebugStat
+          label="Latest price row"
+          note={
+            summary.latestPriceProvider
+              ? `${summary.latestPriceProvider}, ${formatCurrency(summary.latestPriceUsd ?? 0, "USD")}`
+              : "No cached price-history row found."
+          }
+          value={summary.latestPriceDate ? formatDisplayDate(summary.latestPriceDate) : "None"}
+        />
+        <CacheDebugStat
+          label="Price providers"
+          note={
+            summary.latestQuoteProvider
+              ? `Latest quote: ${summary.latestQuoteProvider}`
+              : "No cached quote found."
+          }
+          value={summary.providers.length > 0 ? summary.providers.join(", ") : "None"}
+        />
+      </div>
+    </div>
+  );
+}
+
+function CacheDebugStat({
+  label,
+  value,
+  note,
+}: {
+  label: string;
+  value: string;
+  note: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs font-medium uppercase text-muted-foreground">{label}</p>
+      <p className="mt-1 break-words text-base font-semibold">{value}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{note}</p>
+    </div>
+  );
+}
+
+function SchoolMonthSummary({
+  decision,
+  formatAud,
+}: {
+  decision: CurrentMonthSchoolDecision;
+  formatAud: (value: number) => string;
+}) {
+  return (
+    <div className="rounded-lg border bg-background p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">Current month verdict</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            This is a net-worth check for the current month.
+          </p>
+        </div>
+        <InfoTip title="Current month verdict">
+          <p>
+            In plain terms: keep AAPL counts the old AAPL holding value, then
+            subtracts this month&apos;s school repayment. Pay off and rebuild counts
+            the rebuilt AAPL value plus this month&apos;s top-up, then subtracts any
+            school debt still left after the payoff assumption.
+          </p>
+        </InfoTip>
+      </div>
+      <SchoolVerdictCard decision={decision} formatAud={formatAud} />
+    </div>
+  );
+}
+
+function SchoolVerdictCard({
+  decision,
+  formatAud,
+}: {
+  decision: CurrentMonthSchoolDecision;
+  formatAud: (value: number) => string;
+}) {
+  const isCashOut = decision.verdict === "cashOut";
+  const isKeepAapl = decision.verdict === "keepAapl";
+  const verdictText = isCashOut
+    ? "Pay off debt + rebuild AAPL is ahead"
+    : isKeepAapl
+      ? "Keep AAPL + keep paying debt is ahead"
+      : "Both paths are roughly even";
+  const reason = isCashOut
+    ? `The rebuild path is ahead by ${formatAud(Math.abs(decision.differenceAud))} for this month.`
+    : isKeepAapl
+      ? `Keeping AAPL is ahead by ${formatAud(Math.abs(decision.differenceAud))} for this month.`
+      : `The difference is only ${formatAud(Math.abs(decision.differenceAud))}, so it is too close to call.`;
+  const topUpText =
+    decision.currentMonthDepositTopUpAud > 0
+      ? `${formatAud(decision.currentMonthDepositTopUpAud)} still to log to reach this month's guide.`
+      : "This month's guided deposit is already logged.";
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border p-4",
+        isCashOut && "border-accent bg-accent/40",
+        isKeepAapl && "border-[#f4cf76] bg-[#fff8e7] dark:bg-[#33280f]",
+      )}
+    >
+      <div>
+        <p className="text-sm font-medium text-muted-foreground">
+          {formatDisplayDate(decision.date)}
+        </p>
+        <p className="mt-1 text-xl font-semibold">{verdictText}</p>
+        <p className="mt-2 text-sm text-muted-foreground">{reason}</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {topUpText} This view is cash-flow-adjusted, so the keep-AAPL path is
+          reduced by the monthly school repayment while the rebuild path reflects
+          the payoff assumption.
+        </p>
+      </div>
+      <div className="mt-4 grid gap-3 text-sm md:grid-cols-2">
+        <PathBreakdown
+          title="Keep AAPL + pay debt"
+          value={formatAud(decision.keepAaplNetAud)}
+          lines={[
+            `Starting AAPL value: ${formatAud(decision.keepAaplStartingValueAud)}`,
+            `AAPL movement since sale: ${formatAud(decision.keepAaplMovementAud)}`,
+            `AAPL value now: ${formatAud(decision.keepAaplValueAud)}`,
+            `Monthly debt repayment: -${formatAud(decision.monthlyEducationRepaymentAud)}`,
+            `School debt after this payment: ${formatAud(decision.keepAaplDebtAud)}`,
+          ]}
+          tip="This answers: if you still had the old AAPL holding today, what would it look like after the current month's school repayment cash flow?"
+        />
+        <PathBreakdown
+          title="Pay off + rebuild"
+          value={formatAud(decision.cashOutRebuildNetAud)}
+          lines={[
+            `This month's AAPL target: ${formatAud(decision.aaplDepositAud)}`,
+            `Still to log this month: ${formatAud(decision.currentMonthDepositTopUpAud)}`,
+            `Logged AAPL value: ${formatAud(decision.rebuildAssetValueAud)}`,
+            `Remaining debt after payoff: -${formatAud(decision.debtAfterPayoffAud)}`,
+            `Rebuild movement so far: ${formatAud(decision.rebuildMovementAud)}`,
+          ]}
+          tip="This answers: after applying the payoff assumption, what is your rebuilt AAPL position worth after including this month's guided deposit and any remaining school debt?"
+        />
+      </div>
+    </div>
+  );
+}
+
+function PathBreakdown({
+  title,
+  value,
+  lines,
+  tip,
+}: {
+  title: string;
+  value: string;
+  lines: string[];
+  tip: string;
+}) {
+  return (
+    <div className="rounded-md border bg-background/80 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-muted-foreground">{title}</p>
+        <InfoTip title={title}>
+          <p>{tip}</p>
+        </InfoTip>
+      </div>
+      <p className="mt-1 text-lg font-semibold">{value}</p>
+      <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+        {lines.map((line) => (
+          <p key={line}>{line}</p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DetailsPanel({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  const [shouldRenderContent, setShouldRenderContent] = useState(false);
+  const renderFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (renderFrameRef.current !== null) {
+        window.cancelAnimationFrame(renderFrameRef.current);
+      }
+    };
+  }, []);
+
+  return (
+    <details
+      className="group rounded-lg border bg-card text-card-foreground shadow-sm"
+      onToggle={(event) => {
+        if (renderFrameRef.current !== null) {
+          window.cancelAnimationFrame(renderFrameRef.current);
+          renderFrameRef.current = null;
+        }
+
+        if (!event.currentTarget.open) {
+          setShouldRenderContent(false);
+          return;
+        }
+
+        renderFrameRef.current = window.requestAnimationFrame(() => {
+          renderFrameRef.current = null;
+          setShouldRenderContent(true);
+        });
+      }}
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-5">
+        <div>
+          <p className="font-semibold">{title}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+        </div>
+        <ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      {shouldRenderContent ? <div className="border-t p-5">{children}</div> : null}
+    </details>
+  );
+}
+
+function DetailRow({
+  label,
+  value,
+  strong,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-lg border bg-background px-3 py-2">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className={cn("text-right text-sm font-medium", strong && "font-semibold")}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function ChartBlock({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="rounded-lg border bg-background p-4">
+      <h3 className="mb-3 text-sm font-medium text-muted-foreground">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function Factor({ icon, text }: { icon: ReactNode; text: string }) {
+  return (
+    <div className="flex gap-3 rounded-lg border bg-background p-3">
+      <div className="mt-0.5 text-primary">{icon}</div>
+      <p className="text-sm text-muted-foreground">{text}</p>
+    </div>
+  );
+}

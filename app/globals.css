@@ -1,26 +1,111 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f7f8fb;
+  --foreground: #17202a;
+  --card: #ffffff;
+  --card-foreground: #17202a;
+  --popover: #ffffff;
+  --popover-foreground: #17202a;
+  --primary: #1957d2;
+  --primary-foreground: #ffffff;
+  --secondary: #e9eef8;
+  --secondary-foreground: #17202a;
+  --muted: #eef2f7;
+  --muted-foreground: #667085;
+  --accent: #d9f0e5;
+  --accent-foreground: #113d2d;
+  --destructive: #c2413a;
+  --destructive-foreground: #ffffff;
+  --border: #d9e0ea;
+  --input: #d9e0ea;
+  --ring: #1957d2;
+  --chart-1: #1957d2;
+  --chart-2: #12946d;
+  --chart-3: #d78b21;
+  --chart-4: #7c4dff;
+  --chart-5: #d14d72;
+  --radius: 0.5rem;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #111827;
+    --foreground: #f9fafb;
+    --card: #172033;
+    --card-foreground: #f9fafb;
+    --popover: #172033;
+    --popover-foreground: #f9fafb;
+    --primary: #7aa2ff;
+    --primary-foreground: #081225;
+    --secondary: #243044;
+    --secondary-foreground: #f9fafb;
+    --muted: #202b3d;
+    --muted-foreground: #a8b3c5;
+    --accent: #173b31;
+    --accent-foreground: #c7f4df;
+    --destructive: #f06b62;
+    --destructive-foreground: #210706;
+    --border: #2d3a4f;
+    --input: #2d3a4f;
+    --ring: #7aa2ff;
   }
+}
+
+* {
+  border-color: var(--border);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--primary) 22%, transparent);
+}
+
+.recharts-cartesian-axis-tick-value {
+  fill: var(--muted-foreground);
 }
