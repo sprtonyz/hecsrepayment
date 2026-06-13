@@ -1377,7 +1377,7 @@ export function DashboardClient() {
                   ))}
                 </div>
               </div>
-              {settings.showMonthlyCodexReview ? (
+              {settings.showMonthlyCodexReview && (
                 <div className="rounded-lg border bg-background p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
