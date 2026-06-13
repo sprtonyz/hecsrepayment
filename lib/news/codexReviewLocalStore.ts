@@ -3,7 +3,24 @@ import path from "node:path";
 
 const REVIEW_DIRECTORY = path.join(process.cwd(), "data", "news-review-queue");
 
+let memoryBundle:
+  | {
+      filename: string;
+      absolutePath: string;
+      bundle: Record<string, unknown>;
+    }
+  | undefined;
+
 export async function readLocalCodexReviewBundle(symbol: string, reviewMonth?: string) {
+  const normalizedSymbol = symbol.toUpperCase();
+  if (
+    memoryBundle &&
+    stringValue(memoryBundle.bundle, "symbol") === normalizedSymbol &&
+    (!reviewMonth || stringValue(memoryBundle.bundle, "reviewMonth") === reviewMonth)
+  ) {
+    return memoryBundle.bundle;
+  }
+
   const resolved = reviewMonth
     ? {
         filename: reviewBundleFilename(symbol, reviewMonth),
@@ -49,7 +66,18 @@ export async function writeLocalCodexReviewBundle(input: {
     codexReview: input.codexReview,
   };
 
-  await writeFile(absolutePath, `${JSON.stringify(nextBundle, null, 2)}\n`, "utf8");
+  memoryBundle = {
+    filename,
+    absolutePath,
+    bundle: nextBundle,
+  };
+
+  try {
+    await mkdir(REVIEW_DIRECTORY, { recursive: true });
+    await writeFile(absolutePath, `${JSON.stringify(nextBundle, null, 2)}\n`, "utf8");
+  } catch {
+    // Production deployments can be read-only; keep the bundle in memory and continue.
+  }
   return {
     filename,
     absolutePath,
@@ -83,4 +111,8 @@ function reviewBundleFilename(symbol: string, reviewMonth: string) {
 
 function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stringValue(value: Record<string, unknown>, key: string) {
+  return typeof value[key] === "string" ? (value[key] as string) : undefined;
 }
