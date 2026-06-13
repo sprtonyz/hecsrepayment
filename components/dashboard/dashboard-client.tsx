@@ -530,11 +530,30 @@ export function DashboardClient() {
     planStartDate: settings.planStartDate,
     news: guideNewsDigest,
   });
+  const reviewSummarySource = bestComparisonReview?.codexReview
+    ? {
+        symbol: bestComparisonReview.symbol,
+        digest: bestComparisonReview.codexReview.appliedNewsDigest ?? guideNewsDigest,
+        codexReview: bestComparisonReview.codexReview,
+        rankScore: bestComparisonReview.rankScore,
+      }
+    : {
+        symbol: settings.baseTicker,
+        digest: guideNewsDigest,
+        codexReview: codexReviewDetails,
+        rankScore: undefined as number | undefined,
+      };
   const guideReviewSummary = buildGuideReviewSummary({
-    digest: guideNewsDigest,
-    codexReview: codexReviewDetails,
+    reviewSymbol: reviewSummarySource.symbol,
+    digest: reviewSummarySource.digest,
+    codexReview: reviewSummarySource.codexReview,
     guide: depositGuide,
-    bestComparisonReview,
+    bestComparisonReview: typeof reviewSummarySource.rankScore === "number"
+      ? {
+          symbol: reviewSummarySource.symbol,
+          rankScore: reviewSummarySource.rankScore,
+        }
+      : undefined,
   });
 
   const studyLoanFormulaMonthlyAud = calculateStudyLoanMonthlyRepaymentAud(
@@ -1289,9 +1308,15 @@ export function DashboardClient() {
                 </ul>
               </div>
               <div className="rounded-lg border bg-background p-4">
-                <p className="text-sm font-medium">Review summary</p>
+                <p className="text-sm font-medium">
+                  Review summary for {reviewSummarySource.symbol}
+                </p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Confidence tells you how solid the evidence is, signal mix shows the counted positive/negative/neutral split, material items are the headlines that could actually change the thesis, and suggested tilt is the final lean after those inputs are blended.
+                  {reviewSummarySource.symbol} is the strongest published comparison review right now.
+                  Confidence tells you how solid the evidence is, signal mix shows the counted
+                  positive/negative/neutral split, material items are the headlines that could
+                  actually change the thesis, and suggested tilt is the final lean after those
+                  inputs are blended.
                 </p>
                 <div className="mt-3 grid gap-3">
                   {guideReviewSummary.map((section) => (
@@ -1985,11 +2010,13 @@ function articleDisplayTimestamp(article: {
 }
 
 function buildGuideReviewSummary({
+  reviewSymbol,
   digest,
   codexReview,
   guide,
   bestComparisonReview,
 }: {
+  reviewSymbol: string;
   digest: DepositGuideNewsInput;
   codexReview?: CodexReviewDetails;
   guide: ReturnType<typeof calculateDepositGuide>;
@@ -2012,13 +2039,17 @@ function buildGuideReviewSummary({
   ].slice(0, 3);
 
   const scoreItems = [
-    `Guide score ${guide.signalScore.toFixed(
-      2,
-    )} is an internal tilt score, not a percent. In the 10-point framing, 5.0 is neutral, higher leans into a bigger monthly deposit, and lower leans into a lighter month. This score produced ${formatSignedPercent(
-      guide.adjustmentPercent,
-    )} vs the neutral plan and a target of ${formatCurrency(guide.recommendedDepositAud, "AUD")}.`,
     bestComparisonReview
-      ? `${bestComparisonReview.symbol} is the strongest comparison ticket right now at ${bestComparisonReview.rankScore.toFixed(
+      ? `${reviewSymbol} is leading the comparison set with a ${bestComparisonReview.rankScore.toFixed(
+          2,
+        )}/10 fit score. In the 10-point framing, 5.0 is neutral, higher is a stronger fit, and lower is weaker.`
+      : `Guide score ${guide.signalScore.toFixed(
+          2,
+        )} is an internal tilt score, not a percent. In the 10-point framing, 5.0 is neutral, higher leans into a bigger monthly deposit, and lower leans into a lighter month. This score produced ${formatSignedPercent(
+          guide.adjustmentPercent,
+        )} vs the neutral plan and a target of ${formatCurrency(guide.recommendedDepositAud, "AUD")}.`,
+    bestComparisonReview
+      ? `${reviewSymbol} is the strongest comparison ticket right now at ${bestComparisonReview.rankScore.toFixed(
           2,
         )}/10, so the main guide uses that cross-stock read as a tie-breaker rather than leaning on a single headline.`
       : undefined,
