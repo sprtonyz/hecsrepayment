@@ -43,6 +43,7 @@ function latestByDate<T extends { asOf?: string; date?: string; publishedAt?: st
 }
 
 const TRACKER_DATA_CHANGED_EVENT = "tracker-data-changed";
+const CORE_SNAPSHOT_STORAGE_KEY = "aaplCatchUpTracker:coreSnapshot";
 const MIN_PRICE_HISTORY_POINTS = 7;
 const MAX_PRICE_HISTORY_AGE_DAYS = 7;
 const PRICE_HISTORY_LOOKBACK_MONTHS = 7;
@@ -218,6 +219,36 @@ async function saveSharedTrackerSnapshot(snapshot: Partial<TrackerSnapshot>) {
     });
   } catch {
     // Cloud sync is optional. Local storage remains the source of truth.
+  }
+}
+
+function loadLocalCoreSnapshot() {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(CORE_SNAPSHOT_STORAGE_KEY);
+    if (!raw) {
+      return undefined;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<TrackerSnapshot>;
+    return hasCoreTrackerData(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function saveLocalCoreSnapshot(snapshot: Partial<TrackerSnapshot>) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(CORE_SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Local backup is best-effort only.
   }
 }
 
@@ -421,6 +452,15 @@ export function useTrackerData() {
         setIsLoading(false);
         return;
       }
+
+      const localBackup = loadLocalCoreSnapshot();
+      if (localBackup && hasCoreTrackerData(localBackup)) {
+        await indexedDbAdapter.importSnapshot(localBackup as TrackerSnapshot);
+        const hydrated = await indexedDbAdapter.getSnapshot();
+        setSnapshot(hydrated);
+        setIsLoading(false);
+        return;
+      }
     }
 
     setSnapshot(next);
@@ -454,6 +494,7 @@ export function useTrackerData() {
     }
 
     lastSyncedCoreSnapshotRef.current = coreSnapshotSignature;
+    saveLocalCoreSnapshot(coreSnapshot);
     void saveSharedTrackerSnapshot(coreSnapshot);
   }, [coreSnapshot, coreSnapshotSignature, isLoading]);
 
