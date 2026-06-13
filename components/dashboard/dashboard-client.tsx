@@ -146,7 +146,7 @@ type ReviewerDraft = {
   materialityKeywords: string;
 };
 
-const COMPARISON_SYMBOLS = ["NVDA", "AMZN", "TSLA", "SPACEX"] as const;
+const COMPARISON_SYMBOLS = ["AAPL", "NVDA", "AMZN", "TSLA", "SPACEX"] as const;
 
 export function DashboardClient() {
   const tracker = useTrackerData();
@@ -534,6 +534,7 @@ export function DashboardClient() {
     digest: guideNewsDigest,
     codexReview: codexReviewDetails,
     guide: depositGuide,
+    bestComparisonReview,
   });
 
   const studyLoanFormulaMonthlyAud = calculateStudyLoanMonthlyRepaymentAud(
@@ -1223,7 +1224,7 @@ export function DashboardClient() {
           />
           <SummaryTile
             icon={<TrendingUp className="h-5 w-5" />}
-            title="This Month Deposit Guide"
+            title="Main Deposit Guide"
             value={displayAudValue(depositGuide.recommendedDepositAud)}
             description={`Remaining this month: ${displayAudValue(depositGuide.remainingThisMonthAud)}.`}
             rows={[
@@ -1238,16 +1239,26 @@ export function DashboardClient() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <TrendingUp className="h-5 w-5 text-primary" />
-              This Month Deposit Guide
+              Main Deposit Guide
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {bestComparisonReview ? (
+              <div className="rounded-lg border bg-background p-4 text-sm text-muted-foreground">
+                <p className="font-medium text-foreground">
+                  Strongest comparison ticket: {bestComparisonReview.symbol}
+                </p>
+                <p className="mt-1">
+                  The main deposit guide uses the strongest published comparison review as a tie-breaker, so the monthly move follows the best cross-stock evidence instead of a single headline.
+                </p>
+              </div>
+            ) : null}
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
               <PlainMetric
                 label="Guide"
                 value={guideLabel(depositGuide.direction)}
                 note={`${depositGuide.confidence} confidence, ${formatSignedPercent(depositGuide.adjustmentPercent)} vs neutral.`}
-                tip="This is the app's plain suggestion for this month only. Confidence affects how much of the guardrail the guide uses."
+                tip="This is the app's plain suggestion for this month only. Confidence controls how aggressively the guide leans inside the 20% guardrail."
               />
               <PlainMetric
                 label="Target this month"
@@ -1279,6 +1290,9 @@ export function DashboardClient() {
               </div>
               <div className="rounded-lg border bg-background p-4">
                 <p className="text-sm font-medium">Review summary</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Confidence tells you how solid the evidence is, signal mix shows the counted positive/negative/neutral split, material items are the headlines that could actually change the thesis, and suggested tilt is the final lean after those inputs are blended.
+                </p>
                 <div className="mt-3 grid gap-3">
                   {guideReviewSummary.map((section) => (
                     <div key={section.label} className="rounded-md border bg-muted/30 p-3">
@@ -1300,126 +1314,136 @@ export function DashboardClient() {
                 intentionally go lower, up to {displayAudValue(depositGuide.baseFlexAud)} per month is
                 banked for later months. Free RSS headlines are included when available. If OpenAI
                 API access is configured, article text is analyzed once and cached; otherwise the
-                guide stays anchored to headline scoring, price history, and budget flex.
+                guide stays anchored to headline scoring, price history, and budget flex. This
+                panel exists because it combines the main guide, the strongest comparison ticket,
+                and the review summary in one place.
               </div>
-              <div className="rounded-lg border bg-background p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <p className="text-sm font-medium">Monthly Codex review</p>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {codexReviewIncludedCount} of {codexReviewArticles.length} cached{" "}
-                      {settings.baseTicker} article{codexReviewArticles.length === 1 ? "" : "s"}{" "}
-                      ready for {codexReviewMonth}. {cachedAaplArticles.length} total cached{" "}
-                      {settings.baseTicker} article{cachedAaplArticles.length === 1 ? "" : "s"}.
-                    </p>
+              {settings.showMonthlyCodexReview ? (
+                <div className="rounded-lg border bg-background p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-sm font-medium">Monthly Codex review</p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {codexReviewIncludedCount} of {codexReviewArticles.length} cached{" "}
+                        {settings.baseTicker} article{codexReviewArticles.length === 1 ? "" : "s"}{" "}
+                        ready for {codexReviewMonth}. {cachedAaplArticles.length} total cached{" "}
+                        {settings.baseTicker} article{cachedAaplArticles.length === 1 ? "" : "s"}.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 sm:justify-end">
+                      <Button
+                        className="shrink-0"
+                        disabled={isFetchingCodexArticles || isPreparingCodexReview || isClearingCodexArticles}
+                        onClick={fetchCodexReviewArticles}
+                        size="sm"
+                        variant="outline"
+                      >
+                        {isFetchingCodexArticles ? "Fetching..." : `Fetch ${settings.baseTicker} articles`}
+                        <RefreshCw className={cn("h-4 w-4", isFetchingCodexArticles && "animate-spin")} />
+                      </Button>
+                      <Button
+                        className="shrink-0"
+                        disabled={
+                          isPreparingCodexReview ||
+                          isFetchingCodexArticles ||
+                          isClearingCodexArticles ||
+                          codexReviewArticles.length === 0
+                        }
+                        onClick={prepareMonthlyCodexReviewBundle}
+                        size="sm"
+                        variant="outline"
+                      >
+                        {isPreparingCodexReview ? "Preparing..." : "Prepare bundle"}
+                        <FileText className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        className="shrink-0"
+                        disabled={
+                          isClearingCodexArticles ||
+                          isFetchingCodexArticles ||
+                          isPreparingCodexReview ||
+                          cachedAaplArticles.length === 0
+                        }
+                        onClick={clearCachedCodexArticles}
+                        size="sm"
+                        variant="destructive"
+                      >
+                        {isClearingCodexArticles
+                          ? "Removing..."
+                          : `Remove all cached ${settings.baseTicker}`}
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-2 sm:justify-end">
-                    <Button
-                      className="shrink-0"
-                      disabled={isFetchingCodexArticles || isPreparingCodexReview || isClearingCodexArticles}
-                      onClick={fetchCodexReviewArticles}
-                      size="sm"
-                      variant="outline"
-                    >
-                      {isFetchingCodexArticles ? "Fetching..." : `Fetch ${settings.baseTicker} articles`}
-                      <RefreshCw className={cn("h-4 w-4", isFetchingCodexArticles && "animate-spin")} />
-                    </Button>
-                    <Button
-                      className="shrink-0"
-                      disabled={
-                        isPreparingCodexReview ||
-                        isFetchingCodexArticles ||
-                        isClearingCodexArticles ||
-                        codexReviewArticles.length === 0
-                      }
-                      onClick={prepareMonthlyCodexReviewBundle}
-                      size="sm"
-                      variant="outline"
-                    >
-                      {isPreparingCodexReview ? "Preparing..." : "Prepare bundle"}
-                      <FileText className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      className="shrink-0"
-                      disabled={
-                        isClearingCodexArticles ||
-                        isFetchingCodexArticles ||
-                        isPreparingCodexReview ||
-                        cachedAaplArticles.length === 0
-                      }
-                      onClick={clearCachedCodexArticles}
-                      size="sm"
-                      variant="destructive"
-                    >
-                      {isClearingCodexArticles
-                        ? "Removing..."
-                        : `Remove all cached ${settings.baseTicker}`}
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-                <ReviewerCharterEditor
-                  key={settings.baseTicker}
-                  symbol={settings.baseTicker}
-                  version={REVIEWER_SPEC_VERSION}
-                  onDraftChange={syncReviewerDraftRef}
-                />
-                <details className="mt-3 rounded-md border bg-muted/20 text-sm">
-                  <summary className="cursor-pointer list-none p-3 font-medium">
-                    Cached articles by date ({cachedAaplArticles.length} total)
-                  </summary>
-                  <div className="border-t p-3">
-                    {cachedAaplArticleDateGroups.length > 0 ? (
-                      <div className="space-y-2">
-                        <p className="text-xs text-muted-foreground">
-                          Grouped by published date when available, otherwise collected or cached date.
-                        </p>
-                        {cachedAaplArticleDateGroups.map((group) => (
-                          <div
-                            className="flex items-start justify-between gap-3 rounded-md border bg-background px-3 py-2"
-                            key={group.dateKey}
-                          >
-                            <div>
-                              <p className="font-medium">{group.label}</p>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                {group.publisherCount} publisher{group.publisherCount === 1 ? "" : "s"}
-                                {group.providerCount > 0
-                                  ? ` across ${group.providerCount} feed${group.providerCount === 1 ? "" : "s"}`
-                                  : ""}
+                  <ReviewerCharterEditor
+                    key={settings.baseTicker}
+                    symbol={settings.baseTicker}
+                    version={REVIEWER_SPEC_VERSION}
+                    defaultOpen={settings.showReviewerCharter}
+                    onDraftChange={syncReviewerDraftRef}
+                  />
+                  <details className="mt-3 rounded-md border bg-muted/20 text-sm">
+                    <summary className="cursor-pointer list-none p-3 font-medium">
+                      Cached articles by date ({cachedAaplArticles.length} total)
+                    </summary>
+                    <div className="border-t p-3">
+                      {cachedAaplArticleDateGroups.length > 0 ? (
+                        <div className="space-y-2">
+                          <p className="text-xs text-muted-foreground">
+                            Grouped by published date when available, otherwise collected or cached date.
+                          </p>
+                          {cachedAaplArticleDateGroups.map((group) => (
+                            <div
+                              className="flex items-start justify-between gap-3 rounded-md border bg-background px-3 py-2"
+                              key={group.dateKey}
+                            >
+                              <div>
+                                <p className="font-medium">{group.label}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {group.publisherCount} publisher{group.publisherCount === 1 ? "" : "s"}
+                                  {group.providerCount > 0
+                                    ? ` across ${group.providerCount} feed${group.providerCount === 1 ? "" : "s"}`
+                                    : ""}
+                                </p>
+                              </div>
+                              <p className="shrink-0 text-sm font-semibold">
+                                {group.count} article{group.count === 1 ? "" : "s"}
                               </p>
                             </div>
-                            <p className="shrink-0 text-sm font-semibold">
-                              {group.count} article{group.count === 1 ? "" : "s"}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-muted-foreground">
-                        No cached {settings.baseTicker} articles in local storage.
-                      </p>
-                    )}
-                  </div>
-                </details>
-                {codexReviewStatus ? (
-                  <div
-                    aria-live="polite"
-                    className={cn(
-                      "mt-3 rounded-md border px-3 py-2 text-sm",
-                      codexReviewStatus.tone === "success"
-                        ? "border-accent bg-accent/30 text-accent-foreground"
-                        : "border-destructive/30 bg-destructive/10 text-destructive",
-                    )}
-                  >
-                    <p>{codexReviewStatus.message}</p>
-                    {codexReviewStatus.path ? (
-                      <p className="mt-1 break-all text-xs text-muted-foreground">
-                        {codexReviewStatus.path}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-muted-foreground">
+                          No cached {settings.baseTicker} articles in local storage.
+                        </p>
+                      )}
+                    </div>
+                  </details>
+                  {codexReviewStatus ? (
+                    <div
+                      aria-live="polite"
+                      className={cn(
+                        "mt-3 rounded-md border px-3 py-2 text-sm",
+                        codexReviewStatus.tone === "success"
+                          ? "border-accent bg-accent/30 text-accent-foreground"
+                          : "border-destructive/30 bg-destructive/10 text-destructive",
+                      )}
+                    >
+                      <p>{codexReviewStatus.message}</p>
+                      {codexReviewStatus.path ? (
+                        <p className="mt-1 break-all text-xs text-muted-foreground">
+                          {codexReviewStatus.path}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="rounded-lg border bg-background p-4 text-sm text-muted-foreground">
+                  The monthly Codex workbench is hidden in Settings. Use Review Visibility to show
+                  it again when you want to fetch or prepare the bundle.
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -1429,8 +1453,8 @@ export function DashboardClient() {
             <div>
               <CardTitle>Cross-stock comparison</CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
-                Ranks your saved reviews for TSLA, NVDA, AMZN, and SPACEX so you can see which
-                one looks strongest for the current A$600 budget. Use the batch button to
+                Ranks your saved reviews for AAPL, TSLA, NVDA, AMZN, and SPACEX so you can see
+                which one looks strongest for the current A$600 budget. Use the batch buttons to
                 prepare them all in one pass.
               </p>
             </div>
@@ -1468,8 +1492,9 @@ export function DashboardClient() {
           <CardContent className="space-y-4">
             <div className="rounded-lg border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
               <span className="font-medium text-foreground">Status:</span>{" "}
-              {fetchedComparisonCount}/4 fetched this month, {preparedComparisonCount}/4 bundles ready,{" "}
-              {reviewedComparisonCount}/4 published.{" "}
+              {fetchedComparisonCount}/{COMPARISON_SYMBOLS.length} fetched this month,{" "}
+              {preparedComparisonCount}/{COMPARISON_SYMBOLS.length} bundles ready,{" "}
+              {reviewedComparisonCount}/{COMPARISON_SYMBOLS.length} published.{" "}
               {" "}
               {comparisonStatusRows
                 .map((item) => {
@@ -1501,23 +1526,30 @@ export function DashboardClient() {
                 <div>
                   <p className="text-sm font-medium">
                     {bestComparisonReview
-                      ? bestComparisonReview.rankScore >= 0
+                      ? bestComparisonReview.rankScore >= 5
                         ? `${bestComparisonReview.symbol} looks strongest right now`
                         : `${bestComparisonReview.symbol} is the least weak review right now`
                       : "No published comparison review yet"}
                   </p>
                   <p className="mt-1 text-sm text-muted-foreground">
                     {bestComparisonReview?.codexReview?.suggestedGuideImpact?.rationale ??
-                      "Prepare and publish the four stock reviews to get a ranked recommendation."}
+                      "Prepare and publish the comparison reviews to get a ranked recommendation."}
                   </p>
                 </div>
                 {bestComparisonReview ? (
                   <div className="flex flex-wrap gap-2">
                     <Badge variant="secondary">{stockReviewVerdict(bestComparisonReview.rankScore)}</Badge>
-                    <Badge variant="outline">Score {bestComparisonReview.rankScore.toFixed(2)}</Badge>
+                    <Badge variant="outline">Score {bestComparisonReview.rankScore.toFixed(2)}/10</Badge>
                   </div>
                 ) : null}
               </div>
+              {bestComparisonReview ? (
+                <div className="mt-3 rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
+                  The score is a 10-point fit score, with 5.0 treated as neutral. It starts from the
+                  review digest score, then adds a small boost for positive signal, confidence, and
+                  the suggested tilt before being clipped into the 0 to 10 range.
+                </div>
+              ) : null}
             </div>
             <div className="grid gap-3 xl:grid-cols-2">
               {comparisonReviews.map((item) => {
@@ -1542,14 +1574,21 @@ export function DashboardClient() {
                           {digest?.signal ? newsSignalLabel(digest.signal) : item.status === "prepared" ? "Ready" : "Pending"}
                         </Badge>
                         <Badge variant="outline">
-                          {item.status === "prepared" && !digest ? "Bundle ready" : `Score ${item.rankScore.toFixed(2)}`}
+                          {item.status === "prepared" && !digest ? "Bundle ready" : `Score ${item.rankScore.toFixed(2)}/10`}
                         </Badge>
                       </div>
                     </div>
                     <div className="mt-3 grid gap-2 text-sm">
                       <DetailRow
                         label="Confidence"
-                          value={digest?.confidence ? digest.confidence : item.status === "prepared" ? "Pending publish" : "Pending"}
+                        value={
+                          digest?.confidence
+                            ? `${digest.confidence} confidence`
+                            : item.status === "prepared"
+                              ? "Pending publish"
+                              : "Pending"
+                        }
+                        note="Higher confidence means the source quality and evidence strength were better, not that the headline was louder."
                       />
                       <DetailRow
                         label="Signal mix"
@@ -1560,6 +1599,7 @@ export function DashboardClient() {
                               ? "Pending publish"
                               : "Pending"
                         }
+                        note="Counts positive, negative, and neutral items after duplicate and stale-noise filtering."
                       />
                       <DetailRow
                         label="Material items"
@@ -1567,9 +1607,10 @@ export function DashboardClient() {
                           digest?.materialArticleCount !== undefined
                             ? String(digest.materialArticleCount)
                             : item.status === "prepared"
-                              ? "Pending publish"
-                              : "Pending"
+                            ? "Pending publish"
+                            : "Pending"
                         }
+                        note="Material items are the ones that can change revenue, margins, regulation, or product competitiveness."
                       />
                       <DetailRow
                         label="Suggested tilt"
@@ -1577,6 +1618,7 @@ export function DashboardClient() {
                           item.codexReview?.suggestedGuideImpact?.depositSuggestion ??
                           (item.status === "prepared" ? "Review Latest" : "Prepare bundle")
                         }
+                        note="This is the final lean after signal, confidence, and guardrail limits are blended."
                       />
                     </div>
                     <p className="mt-3 text-sm text-muted-foreground">
@@ -1920,14 +1962,14 @@ function scoreStockReview(review?: CodexReviewDetails) {
       ? review.suggestedGuideImpact.expectedAdjustmentPercent / 12
       : 0;
   const rawScore = (digest.score ?? 0) + signalWeight * 0.6 + confidenceWeight + adjustmentWeight;
-  return Math.round(rawScore * 100) / 100;
+  return Math.round(Math.min(10, Math.max(0, 5 + rawScore)) * 100) / 100;
 }
 
 function stockReviewVerdict(score: number) {
-  if (score >= 1) {
+  if (score >= 7) {
     return "Best fit";
   }
-  if (score <= -1) {
+  if (score <= 4) {
     return "Weak fit";
   }
   return "Mixed";
@@ -1945,10 +1987,12 @@ function buildGuideReviewSummary({
   digest,
   codexReview,
   guide,
+  bestComparisonReview,
 }: {
   digest: DepositGuideNewsInput;
   codexReview?: CodexReviewDetails;
   guide: ReturnType<typeof calculateDepositGuide>;
+  bestComparisonReview?: { symbol: string; rankScore: number };
 }) {
   const thesisSignals = codexReview?.longTermThesisSignals ?? [];
   const positiveItems = thesisSignals
@@ -1969,9 +2013,14 @@ function buildGuideReviewSummary({
   const scoreItems = [
     `Guide score ${guide.signalScore.toFixed(
       2,
-    )} is not a percent. 0.00 is neutral; positive leans higher, negative leans lower, and about +/-2.00 uses the normal monthly guardrail before any banked-flex cap. This score produced ${formatSignedPercent(
+    )} is an internal tilt score, not a percent. In the 10-point framing, 5.0 is neutral, higher leans into a bigger monthly deposit, and lower leans into a lighter month. This score produced ${formatSignedPercent(
       guide.adjustmentPercent,
     )} vs the neutral plan and a target of ${formatCurrency(guide.recommendedDepositAud, "AUD")}.`,
+    bestComparisonReview
+      ? `${bestComparisonReview.symbol} is the strongest comparison ticket right now at ${bestComparisonReview.rankScore.toFixed(
+          2,
+        )}/10, so the main guide uses that cross-stock read as a tie-breaker rather than leaning on a single headline.`
+      : undefined,
     codexReview?.suggestedGuideImpact?.rationale ?? codexReview?.rationale,
   ].filter(isPresent);
 
@@ -2001,9 +2050,12 @@ function buildGuideReviewSummary({
           : [`${digest.neutralArticleCount ?? 0} neutral article signals were counted.`],
     },
     {
-      label: "Guide Score",
+      label: "Why This Guide",
       className: "text-primary",
-      items: scoreItems.length > 0 ? scoreItems : guide.reasons.slice(0, 2),
+      items:
+        scoreItems.length > 0
+          ? scoreItems
+          : guide.reasons.slice(0, 2),
     },
   ];
 }
@@ -2170,10 +2222,12 @@ function calculateCurrentMonthContributionAud(
 function ReviewerCharterEditor({
   symbol,
   version,
+  defaultOpen = false,
   onDraftChange,
 }: {
   symbol: string;
   version: string;
+  defaultOpen?: boolean;
   onDraftChange: (draft: ReviewerDraft) => void;
 }) {
   const [draft, setDraft] = useState(() => loadReviewerDraft(symbol));
@@ -2184,19 +2238,22 @@ function ReviewerCharterEditor({
   }, [draft, onDraftChange, symbol]);
 
   return (
-    <div className="mt-4 rounded-lg border bg-muted/20 p-4">
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-sm font-medium">Reviewer charter</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            This draft is injected into every review bundle for {symbol} and saved locally in this browser.
-          </p>
+    <details className="mt-4 rounded-lg border bg-muted/20 p-4" open={defaultOpen}>
+      <summary className="cursor-pointer list-none">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-sm font-medium">Reviewer charter</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Collapsed by default unless you turn it on in Settings. This draft is injected into
+              every review bundle for {symbol} and saved locally in this browser.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="secondary">{draft.role || "Thesis Impact Analyst"}</Badge>
+            <Badge variant="outline">v{version}</Badge>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Badge variant="secondary">{draft.role || "Thesis Impact Analyst"}</Badge>
-          <Badge variant="outline">v{version}</Badge>
-        </div>
-      </div>
+      </summary>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <Field label="Role">
           <Input value={draft.role} onChange={(event) => setDraft((current) => ({ ...current, role: event.target.value }))} />
@@ -2268,7 +2325,7 @@ function ReviewerCharterEditor({
           Reset to stock profile
         </Button>
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -2649,16 +2706,21 @@ function DetailsPanel({
 function DetailRow({
   label,
   value,
+  note,
   strong,
 }: {
   label: string;
   value: string;
+  note?: string;
   strong?: boolean;
 }) {
   return (
     <div className="flex items-start justify-between gap-3 rounded-lg border bg-background px-3 py-2">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className={cn("text-right text-sm font-medium", strong && "font-semibold")}>
+      <div className="min-w-0">
+        <span className="text-sm text-muted-foreground">{label}</span>
+        {note ? <p className="mt-1 text-xs text-muted-foreground">{note}</p> : null}
+      </div>
+      <span className={cn("shrink-0 text-right text-sm font-medium", strong && "font-semibold")}>
         {value}
       </span>
     </div>

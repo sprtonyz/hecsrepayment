@@ -43,6 +43,8 @@ export type AppSettings = {
   studyLoanAnnualIndexationRatePercent: number;
   studyLoanUseIncomeFormula: boolean;
   studyLoanRedirectFreedRepayment: boolean;
+  showMonthlyCodexReview: boolean;
+  showReviewerCharter: boolean;
   isDemoMode?: boolean;
   createdAt: string;
   updatedAt: string;

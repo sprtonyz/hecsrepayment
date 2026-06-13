@@ -60,6 +60,10 @@ function SettingsForm({ tracker }: { tracker: ReturnType<typeof useTrackerData> 
   );
   const [studyLoanRedirectFreedRepayment, setStudyLoanRedirectFreedRepayment] =
     useState(settings.studyLoanRedirectFreedRepayment);
+  const [showMonthlyCodexReview, setShowMonthlyCodexReview] = useState(
+    settings.showMonthlyCodexReview,
+  );
+  const [showReviewerCharter, setShowReviewerCharter] = useState(settings.showReviewerCharter);
 
   const [saleDate, setSaleDate] = useState(saleEvent?.saleDate || "");
   const [sharesSold, setSharesSold] = useState(String(saleEvent?.sharesSold || ""));
@@ -94,6 +98,8 @@ function SettingsForm({ tracker }: { tracker: ReturnType<typeof useTrackerData> 
       studyLoanAnnualIndexationRatePercent: Number(studyLoanAnnualIndexationRatePercent || 0),
       studyLoanUseIncomeFormula,
       studyLoanRedirectFreedRepayment,
+      showMonthlyCodexReview,
+      showReviewerCharter,
     });
   }
 
@@ -234,6 +240,35 @@ function SettingsForm({ tracker }: { tracker: ReturnType<typeof useTrackerData> 
               <Button onClick={saveSettings}>
                 <Save className="h-4 w-4" />
                 Save data settings
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Review Visibility</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2">
+            <ToggleRow
+              label="Show monthly Codex review"
+              checked={showMonthlyCodexReview}
+              onCheckedChange={setShowMonthlyCodexReview}
+            />
+            <ToggleRow
+              label="Show reviewer charter"
+              checked={showReviewerCharter}
+              onCheckedChange={setShowReviewerCharter}
+            />
+            <div className="rounded-md bg-muted p-3 text-sm text-muted-foreground md:col-span-2">
+              Keep the monthly review panel tucked away unless you need to inspect the latest
+              bundle. The reviewer charter can stay collapsed most days and opened only when you
+              want to edit the thesis lens.
+            </div>
+            <div className="md:col-span-2">
+              <Button onClick={saveSettings}>
+                <Save className="h-4 w-4" />
+                Save review visibility
               </Button>
             </div>
           </CardContent>

@@ -43,6 +43,8 @@ export function createDefaultSettings(): AppSettings {
     studyLoanAnnualIndexationRatePercent: 3.2,
     studyLoanUseIncomeFormula: false,
     studyLoanRedirectFreedRepayment: true,
+    showMonthlyCodexReview: false,
+    showReviewerCharter: false,
     createdAt: now,
     updatedAt: now,
   };

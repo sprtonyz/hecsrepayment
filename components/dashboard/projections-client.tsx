@@ -544,11 +544,11 @@ export function ProjectionsClient() {
             tooltip="This is recalculated from the selected price growth, FX, dividend, and horizon assumptions."
           />
           <MetricCard
-            title="This Month Guide"
+            title="Main Guide"
             value={formatCurrency(depositGuide.recommendedDepositAud, "AUD")}
             description={`${formatSignedPercent(depositGuide.adjustmentPercent)} from neutral. Score ${depositGuide.signalScore.toFixed(2)}.`}
             tone={depositGuide.direction === "increase" ? "primary" : depositGuide.direction === "decrease" ? "warning" : "default"}
-            tooltip="Guide score is not a percent: 0.00 is neutral, positive leans higher, negative leans lower."
+            tooltip="Guide score is an internal tilt score, not a percent: 0.00 is neutral, positive leans higher, negative leans lower."
           />
         </div>
 
@@ -755,7 +755,7 @@ export function ProjectionsClient() {
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]">
           <Card>
             <CardHeader>
-              <CardTitle>This Month Deposit Guide</CardTitle>
+              <CardTitle>Main Deposit Guide</CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
                 Summary view replacing the raw source list: positives, negatives, neutral items, and why the score moved.
               </p>
@@ -780,10 +780,16 @@ export function ProjectionsClient() {
                   note={`${guideNewsDigest.highMaterialityCount ?? 0} high-impact, ${guideNewsDigest.escalatedCount ?? 0} escalated.`}
                 />
                 <GuideStat
-                  label="Guide score"
+                  label="Guide score (internal)"
                   value={depositGuide.signalScore.toFixed(2)}
-                  note={`${formatSignedPercent(depositGuide.adjustmentPercent)} adjustment.`}
+                  note={`${formatSignedPercent(depositGuide.adjustmentPercent)} adjustment, not a percent score.`}
                 />
+              </div>
+              <div className="rounded-lg border bg-background p-4 text-sm text-muted-foreground">
+                Confidence tells you how solid the evidence is, signal mix shows the counted
+                positive/negative/neutral split, material items are the headlines that can move
+                revenue, margins, regulation, or product competitiveness, and suggested tilt is the
+                final lean after those inputs are blended.
               </div>
               <div className="grid gap-3 lg:grid-cols-2">
                 {guideReviewSummary.map((section) => (
@@ -1107,7 +1113,7 @@ function buildGuideReviewSummary({
   const scoreItems = [
     `Guide score ${guide.signalScore.toFixed(
       2,
-    )} is not a percent. 0.00 is neutral; positive leans higher, negative leans lower, and roughly +/-2.00 uses the normal monthly guardrail before banked-flex caps. This score produced ${formatSignedPercent(
+    )} is an internal tilt score, not a percent. In the 10-point framing, 5.0 is neutral, higher leans into a bigger monthly deposit, and lower leans into a lighter month. This score produced ${formatSignedPercent(
       guide.adjustmentPercent,
     )} versus neutral and a target of ${formatCurrency(guide.recommendedDepositAud, "AUD")}.`,
     codexReview?.suggestedGuideImpact?.rationale ?? codexReview?.rationale,
