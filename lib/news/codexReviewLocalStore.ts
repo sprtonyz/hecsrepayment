@@ -45,7 +45,6 @@ export async function writeLocalCodexReviewBundle(input: {
 }) {
   const filename = input.filename || reviewBundleFilename(input.symbol, input.reviewMonth);
   const absolutePath = path.join(REVIEW_DIRECTORY, filename);
-  await mkdir(REVIEW_DIRECTORY, { recursive: true });
 
   const existingBundle = await readBundleFile(absolutePath).catch(() => undefined);
   const nextBundle = {
