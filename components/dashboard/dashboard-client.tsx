@@ -1546,8 +1546,8 @@ export function DashboardClient() {
               {bestComparisonReview ? (
                 <div className="mt-3 rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
                   The score is a 10-point fit score, with 5.0 treated as neutral. It starts from the
-                  review digest score, then adds a small boost for positive signal, confidence, and
-                  the suggested tilt before being clipped into the 0 to 10 range.
+                  review digest score itself, then adds a small boost for positive signal,
+                  confidence, and the suggested tilt before being clipped into the 0 to 10 range.
                 </div>
               ) : null}
             </div>
@@ -1961,8 +1961,9 @@ function scoreStockReview(review?: CodexReviewDetails) {
     typeof review.suggestedGuideImpact?.expectedAdjustmentPercent === "number"
       ? review.suggestedGuideImpact.expectedAdjustmentPercent / 12
       : 0;
-  const rawScore = (digest.score ?? 0) + signalWeight * 0.6 + confidenceWeight + adjustmentWeight;
-  return Math.round(Math.min(10, Math.max(0, 5 + rawScore)) * 100) / 100;
+  const baseScore = typeof digest.score === "number" ? digest.score : 5;
+  const rawScore = baseScore + signalWeight * 0.6 + confidenceWeight + adjustmentWeight;
+  return Math.round(Math.min(10, Math.max(0, rawScore)) * 100) / 100;
 }
 
 function stockReviewVerdict(score: number) {
