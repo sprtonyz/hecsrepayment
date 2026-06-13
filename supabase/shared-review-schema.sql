@@ -63,3 +63,11 @@ create index if not exists shared_news_analyses_article_id_idx
 
 alter table public.shared_news_articles enable row level security;
 alter table public.shared_news_analyses enable row level security;
+
+create table if not exists public.shared_tracker_snapshots (
+  id text primary key,
+  snapshot jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+alter table public.shared_tracker_snapshots enable row level security;

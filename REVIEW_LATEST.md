@@ -12,7 +12,7 @@ The review is decision support for the user's AAPL catch-up tracker, not a price
 
 1. Run `npm run review:latest`.
 2. Read the generated bundle path from the command output, usually `data/news-review-queue/YYYY-MM-aapl-codex-review.json`.
-3. Inspect `reviewBrief.coverage`, `reviewBrief.articleReviewTable`, `duplicateGroups`, all `articles`, `readableTextExcerpt`, and any `existingApiAnalysis`.
+3. Inspect `reviewerSpec`, `reviewBrief.reviewerProfile`, `reviewBrief.coverage`, `reviewBrief.articleReviewTable`, `duplicateGroups`, all `articles`, `readableTextExcerpt`, and any `existingApiAnalysis`.
 4. For summary-only articles that appear material, inspect the original `url` when accessible so wording, caveats, and source quality are not judged from an RSS headline alone.
 5. Decide which articles have material investment weight. Classify each material item as positive or negative unless it is genuinely balanced and material; no-weight items belong in `staleOrNoisyItems`, not in neutral counts.
 6. Insert or replace the bundle's top-level `codexReview` object.

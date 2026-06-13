@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -26,8 +26,11 @@ import { AppShell } from "@/components/layout/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { InfoTip } from "@/components/ui/info-tip";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { Textarea } from "@/components/ui/textarea";
 import {
   buildHistoricalValueSeries,
   calculateCatchUpMetrics,
@@ -39,8 +42,10 @@ import {
 import { formatDisplayDate, todayIso } from "@/lib/domain/dates";
 import { formatCurrency, formatPercent, formatShares, roundMoney } from "@/lib/domain/money";
 import { buildAiNewsDigest } from "@/lib/ai/articleAnalysis";
+import { getCompanyReviewProfile } from "@/lib/news/companyReviewProfiles";
 import { isRelevantNewsArticle } from "@/lib/news/relevance";
 import { buildNewsDigest } from "@/lib/news/sentiment";
+import { REVIEWER_SPEC_VERSION, type ReviewerContextOverride } from "@/lib/news/reviewerSpec";
 import { projectCatchUp } from "@/lib/domain/projections";
 import {
   buildSchoolDecisionCompoundTimeline,
@@ -69,6 +74,34 @@ type CodexReviewLookupResponse = {
   codexReview?: CodexReviewDetails | null;
 };
 
+type CodexReviewPrepareResponse = {
+  error?: string;
+  path?: string;
+  includedArticleCount?: number;
+  reviewerProfile?: {
+    version?: string;
+    role?: string;
+    posture?: string;
+    companyContext?: {
+      companyName?: string;
+      sector?: string;
+    };
+  };
+  reviewBrief?: {
+    reviewerProfile?: {
+      version?: string;
+      role?: string;
+      companyContext?: {
+        companyName?: string;
+        sector?: string;
+      };
+    };
+    duplicateGroupCount?: number;
+    likelyNoiseArticleCount?: number;
+    articleTextStatusCounts?: Record<string, number>;
+  };
+};
+
 type CodexReviewDetails = {
   appliedNewsDigest?: DepositGuideNewsInput;
   longTermThesisSignals?: CodexReviewTheme[];
@@ -84,12 +117,36 @@ type CodexReviewDetails = {
   rationale?: string;
 };
 
+type StockReviewComparisonCard = {
+  symbol: string;
+  reviewMonth: string;
+  status: "loaded" | "prepared" | "missing" | "error";
+  filename?: string;
+  generatedAt?: string;
+  rankScore: number;
+  codexReview?: CodexReviewDetails;
+  error?: string;
+};
+
 type CodexReviewTheme = {
   theme?: string;
   direction?: string;
   materiality?: string;
   judgement?: string;
 };
+
+type ReviewerDraft = {
+  role: string;
+  mandate: string;
+  posture: string;
+  companyName: string;
+  sector: string;
+  thesisDrivers: string;
+  keyRisks: string;
+  materialityKeywords: string;
+};
+
+const COMPARISON_SYMBOLS = ["NVDA", "AMZN", "TSLA", "SPACEX"] as const;
 
 export function DashboardClient() {
   const tracker = useTrackerData();
@@ -106,10 +163,12 @@ export function DashboardClient() {
     warning,
     refreshMarketData,
     refreshNewsArticles,
+    refreshNewsArticlesForSymbols,
     clearNewsCacheForSymbol,
     clearMarketDataCacheForSymbol,
   } = tracker;
   const [isPreparingCodexReview, setIsPreparingCodexReview] = useState(false);
+  const [isPreparingComparisonReviews, setIsPreparingComparisonReviews] = useState(false);
   const [isFetchingCodexArticles, setIsFetchingCodexArticles] = useState(false);
   const [isClearingCodexArticles, setIsClearingCodexArticles] = useState(false);
   const [isClearingMarketCache, setIsClearingMarketCache] = useState(false);
@@ -123,7 +182,24 @@ export function DashboardClient() {
     digest?: DepositGuideNewsInput;
     review?: CodexReviewDetails;
   }>();
+  const [comparisonReviews, setComparisonReviews] = useState<StockReviewComparisonCard[]>([]);
+  const [comparisonLoading, setComparisonLoading] = useState(true);
+  const [comparisonError, setComparisonError] = useState<string | undefined>();
+  const [comparisonRefreshTick, setComparisonRefreshTick] = useState(0);
+  const reviewerDraftRef = useRef<ReviewerDraft>(createReviewerDraft(settings.baseTicker));
   const autoRefreshKeyRef = useRef<string | undefined>(undefined);
+  const syncReviewerDraftRef = useCallback((draft: ReviewerDraft) => {
+    reviewerDraftRef.current = draft;
+  }, []);
+  const refreshComparisonReviews = useCallback(() => {
+    setComparisonLoading(true);
+    setComparisonError(undefined);
+    setComparisonRefreshTick((tick) => tick + 1);
+  }, []);
+
+  useEffect(() => {
+    reviewerDraftRef.current = loadReviewerDraft(settings.baseTicker);
+  }, [settings.baseTicker]);
 
   useEffect(() => {
     if (!saleEvent) {
@@ -138,7 +214,7 @@ export function DashboardClient() {
       return;
     }
     autoRefreshKeyRef.current = autoRefreshKey;
-    refreshMarketData(false);
+    refreshMarketData(false, { silent: true });
   }, [refreshMarketData, saleEvent, settings.baseTicker, settings.marketDataProvider]);
 
   const metrics = useMemo(
@@ -276,6 +352,84 @@ export function DashboardClient() {
       isActive = false;
     };
   }, [codexReviewLookupKey, codexReviewMonth, settings.baseTicker]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    queueMicrotask(() => {
+      if (!isActive) {
+        return;
+      }
+      setComparisonLoading(true);
+      setComparisonError(undefined);
+    });
+
+    Promise.all(
+      COMPARISON_SYMBOLS.map(async (symbol) => {
+        try {
+          const params = new URLSearchParams({
+            symbol,
+            reviewMonth: codexReviewMonth,
+          });
+          const response = await fetch(`/api/codex-review-bundle?${params.toString()}`, {
+            cache: "no-store",
+          });
+          if (!response.ok) {
+            return {
+              symbol,
+              reviewMonth: codexReviewMonth,
+              status: "missing" as const,
+              rankScore: -999,
+            };
+          }
+          const payload = (await response.json()) as CodexReviewLookupResponse & {
+            filename?: string;
+            generatedAt?: string;
+          };
+          const review = payload.codexReview ?? undefined;
+          return {
+            symbol,
+            reviewMonth: codexReviewMonth,
+            status: review ? "loaded" : "prepared",
+            filename: payload.filename,
+            generatedAt: payload.generatedAt,
+            codexReview: review,
+            rankScore: review ? scoreStockReview(review) : 0,
+          } as StockReviewComparisonCard;
+        } catch (error) {
+          return {
+            symbol,
+            reviewMonth: codexReviewMonth,
+            status: "error" as const,
+            rankScore: -999,
+            error: error instanceof Error ? error.message : "Could not load review.",
+          };
+        }
+      }),
+    )
+      .then((results) => {
+        if (!isActive) {
+          return;
+        }
+        setComparisonReviews(results.sort((left, right) => right.rankScore - left.rankScore));
+      })
+      .catch((error) => {
+        if (!isActive) {
+          return;
+        }
+        setComparisonError(error instanceof Error ? error.message : "Could not load comparison reviews.");
+      })
+      .finally(() => {
+        if (isActive) {
+          setComparisonLoading(false);
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [codexReviewMonth, comparisonRefreshTick]);
+
   const codexReviewDigest =
     codexReviewLookup?.lookupKey === codexReviewLookupKey
       ? codexReviewLookup.digest
@@ -284,6 +438,29 @@ export function DashboardClient() {
     codexReviewLookup?.lookupKey === codexReviewLookupKey
       ? codexReviewLookup.review
       : undefined;
+  const bestComparisonReview = comparisonReviews.find((item) => item.status === "loaded");
+  const comparisonStatusRows = useMemo(
+    () =>
+      COMPARISON_SYMBOLS.map((symbol) => {
+        const monthArticleCount = (snapshot.newsArticles || []).filter(
+          (article) => article.symbol === symbol && articleMonthKey(article) === codexReviewMonth,
+        ).length;
+        const comparisonEntry = comparisonReviews.find(
+          (item) => item.symbol === symbol && item.status !== "error",
+        );
+        return {
+          symbol,
+          fetched: monthArticleCount > 0,
+          articleCount: monthArticleCount,
+          prepared: Boolean(comparisonEntry),
+          reviewed: comparisonEntry?.status === "loaded",
+        };
+      }),
+    [codexReviewMonth, comparisonReviews, snapshot.newsArticles],
+  );
+  const fetchedComparisonCount = comparisonStatusRows.filter((item) => item.fetched).length;
+  const preparedComparisonCount = comparisonStatusRows.filter((item) => item.prepared).length;
+  const reviewedComparisonCount = comparisonStatusRows.filter((item) => item.reviewed).length;
   const guideNewsDigest =
     codexReviewDigest ??
     (aiNewsDigest.articleCount > 0
@@ -542,6 +719,18 @@ export function DashboardClient() {
     logThisMonthAmountAud.toFixed(2),
   )}&targetAud=${encodeURIComponent(depositGuide.recommendedDepositAud.toFixed(2))}&date=${todayIso()}`;
 
+  function getReviewArticlesForSymbol(symbol: string) {
+    const normalizedSymbol = symbol.toUpperCase();
+    return (snapshot.newsArticles || [])
+      .filter(
+        (article) =>
+          article.symbol === normalizedSymbol &&
+          isRelevantNewsArticle(article, normalizedSymbol) &&
+          articleMonthKey(article) === codexReviewMonth,
+      )
+      .sort(compareArticlesForCodexReview);
+  }
+
   async function prepareMonthlyCodexReviewBundle() {
     if (codexReviewArticles.length === 0) {
       setCodexReviewStatus({
@@ -597,6 +786,7 @@ export function DashboardClient() {
               cachedArticleCountForMonth: codexReviewArticles.length,
               localBundleArticleLimit: codexReviewArticleLimit,
             },
+            reviewerContext: reviewerDraftToContext(reviewerDraftRef.current),
           },
         }),
       });
@@ -604,7 +794,24 @@ export function DashboardClient() {
         error?: string;
         path?: string;
         includedArticleCount?: number;
+        reviewerProfile?: {
+          version?: string;
+          role?: string;
+          posture?: string;
+          companyContext?: {
+            companyName?: string;
+            sector?: string;
+          };
+        };
         reviewBrief?: {
+          reviewerProfile?: {
+            version?: string;
+            role?: string;
+            companyContext?: {
+              companyName?: string;
+              sector?: string;
+            };
+          };
           duplicateGroupCount?: number;
           likelyNoiseArticleCount?: number;
           articleTextStatusCounts?: Record<string, number>;
@@ -615,6 +822,9 @@ export function DashboardClient() {
         throw new Error(result.error || "Could not prepare the Codex review bundle.");
       }
 
+      const reviewerVersion =
+        result.reviewerProfile?.version ?? result.reviewBrief?.reviewerProfile?.version;
+
       setCodexReviewStatus({
         tone: "success",
         message: `Saved ${result.includedArticleCount ?? 0} article${
@@ -623,9 +833,12 @@ export function DashboardClient() {
           result.reviewBrief?.duplicateGroupCount === 1 ? "" : "s"
         }, ${result.reviewBrief?.likelyNoiseArticleCount ?? 0} likely-noise item${
           result.reviewBrief?.likelyNoiseArticleCount === 1 ? "" : "s"
-        }).`,
+        }${reviewerVersion ? `, reviewer charter v${reviewerVersion}` : ""}).`,
         path: result.path,
       });
+      if (COMPARISON_SYMBOLS.includes(settings.baseTicker as (typeof COMPARISON_SYMBOLS)[number])) {
+        refreshComparisonReviews();
+      }
     } catch (error) {
       setCodexReviewStatus({
         tone: "error",
@@ -634,6 +847,151 @@ export function DashboardClient() {
     } finally {
       setIsPreparingCodexReview(false);
     }
+  }
+
+  async function prepareAllComparisonReviewBundles() {
+    setIsPreparingComparisonReviews(true);
+    setCodexReviewStatus(undefined);
+
+    try {
+      const results = await Promise.allSettled(
+        COMPARISON_SYMBOLS.map((symbol) => prepareReviewBundleForSymbol(symbol, "dashboard-batch")),
+      );
+      const preparedSymbols: string[] = [];
+      const skippedSymbols: string[] = [];
+      const failedMessages: string[] = [];
+
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          if (result.value.status === "saved") {
+            preparedSymbols.push(result.value.symbol);
+          } else {
+            skippedSymbols.push(result.value.symbol);
+          }
+          continue;
+        }
+        failedMessages.push(
+          result.reason instanceof Error ? result.reason.message : "Could not prepare a review bundle.",
+        );
+      }
+
+      const parts = [];
+      if (preparedSymbols.length > 0) {
+        parts.push(`Prepared ${preparedSymbols.join(", ")}`);
+      }
+      if (skippedSymbols.length > 0) {
+        parts.push(`Skipped ${skippedSymbols.join(", ")} (no cached articles for ${codexReviewMonth})`);
+      }
+      if (failedMessages.length > 0) {
+        parts.push(`Failed: ${failedMessages[0]}`);
+      }
+
+      setCodexReviewStatus({
+        tone: failedMessages.length > 0 && preparedSymbols.length === 0 ? "error" : "success",
+        message:
+          parts.length > 0
+            ? `${parts.join(". ")}.`
+            : "No comparison review bundles were prepared.",
+      });
+      refreshComparisonReviews();
+    } finally {
+      setIsPreparingComparisonReviews(false);
+    }
+  }
+
+  async function fetchAllComparisonNews() {
+    setIsFetchingCodexArticles(true);
+    setCodexReviewStatus(undefined);
+
+    try {
+      const results = await refreshNewsArticlesForSymbols(Array.from(COMPARISON_SYMBOLS));
+      const fetched = results.filter((item) => item.result).map((item) => item.symbol);
+      const failed = results.filter((item) => item.error).map((item) => item.symbol);
+      const messageParts = [];
+      if (fetched.length > 0) {
+        messageParts.push(`Fetched ${fetched.join(", ")}`);
+      }
+      if (failed.length > 0) {
+        messageParts.push(`Failed for ${failed.join(", ")}`);
+      }
+
+      setCodexReviewStatus({
+        tone: failed.length > 0 && fetched.length === 0 ? "error" : "success",
+        message:
+          messageParts.length > 0
+            ? `${messageParts.join(". ")}.`
+            : "No comparison news was fetched.",
+      });
+      refreshComparisonReviews();
+    } catch (error) {
+      setCodexReviewStatus({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Could not fetch comparison news.",
+      });
+    } finally {
+      setIsFetchingCodexArticles(false);
+    }
+  }
+
+  async function prepareReviewBundleForSymbol(
+    symbol: string,
+    generatedFrom: "dashboard" | "dashboard-batch",
+  ) {
+    const normalizedSymbol = symbol.toUpperCase();
+    const symbolArticles = getReviewArticlesForSymbol(normalizedSymbol);
+    if (symbolArticles.length === 0) {
+      return {
+        symbol: normalizedSymbol,
+        status: "missing" as const,
+      };
+    }
+
+    const selectedDigest =
+      normalizedSymbol === settings.baseTicker
+        ? guideNewsDigest
+        : (() => {
+            const aiDigest = buildAiNewsDigest(normalizedSymbol, snapshot.newsAnalyses || []);
+            if (aiDigest.articleCount > 0) {
+              return { ...aiDigest, analysisMode: "aiArticleAnalysis" as const };
+            }
+            return {
+              ...buildNewsDigest(normalizedSymbol, symbolArticles),
+              analysisMode: "headlineRules" as const,
+            };
+          })();
+
+    const response = await fetch("/api/codex-review-bundle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        symbol: normalizedSymbol,
+        reviewMonth: codexReviewMonth,
+        articles: symbolArticles,
+        analyses: snapshot.newsAnalyses || [],
+        guideContext: {
+          generatedFrom,
+          generatedForDate: todayIso(),
+          newsContext: {
+            selectedDigest,
+            headlineDigest: buildNewsDigest(normalizedSymbol, symbolArticles),
+            aiDigest: buildAiNewsDigest(normalizedSymbol, snapshot.newsAnalyses || []),
+            cachedArticleCountForMonth: symbolArticles.length,
+            localBundleArticleLimit: codexReviewArticleLimit,
+          },
+        },
+      }),
+    });
+
+    const result = (await response.json().catch(() => ({}))) as CodexReviewPrepareResponse;
+    if (!response.ok) {
+      throw new Error(result.error || "Could not prepare the Codex review bundle.");
+    }
+
+    return {
+      symbol: normalizedSymbol,
+      status: "saved" as const,
+      result,
+    };
   }
 
   async function fetchCodexReviewArticles() {
@@ -765,12 +1123,7 @@ export function DashboardClient() {
                 </div>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-3">
-                <HeroStat
-                  label="Current plan"
-                  value={currentPlanText}
-                  note="AUD contributions are converted to USD for the comparison."
-                />
+              <div className="grid gap-3 md:grid-cols-2">
                 <HeroStat
                   label="Suggested deposit this month"
                   value={displayAudValue(depositGuide.recommendedDepositAud)}
@@ -909,12 +1262,6 @@ export function DashboardClient() {
                 tip="This is the guardrail. The app can recommend any amount inside this range, not only the endpoints."
               />
               <PlainMetric
-                label="Current month logged"
-                value={displayAudValue(depositGuide.currentMonthContributedAud)}
-                note="Only contributions dated this month are counted here."
-                tip="This ignores older contributions. It answers: how much have you already put in for the current month?"
-              />
-              <PlainMetric
                 label="News signal"
                 value={newsSignalLabel(guideNewsDigest.signal)}
                 note={`${guideNewsDigest.articleCount} ${newsArticleLabel(guideNewsDigest.analysisMode)}${guideNewsDigest.articleCount === 1 ? "" : "s"} from ${newsPublisherText(guideNewsDigest)}.`}
@@ -989,7 +1336,7 @@ export function DashboardClient() {
                       size="sm"
                       variant="outline"
                     >
-                      {isPreparingCodexReview ? "Preparing..." : "Prepare review"}
+                      {isPreparingCodexReview ? "Preparing..." : "Prepare bundle"}
                       <FileText className="h-4 w-4" />
                     </Button>
                     <Button
@@ -1011,6 +1358,12 @@ export function DashboardClient() {
                     </Button>
                   </div>
                 </div>
+                <ReviewerCharterEditor
+                  key={settings.baseTicker}
+                  symbol={settings.baseTicker}
+                  version={REVIEWER_SPEC_VERSION}
+                  onDraftChange={syncReviewerDraftRef}
+                />
                 <details className="mt-3 rounded-md border bg-muted/20 text-sm">
                   <summary className="cursor-pointer list-none p-3 font-medium">
                     Cached articles by date ({cachedAaplArticles.length} total)
@@ -1071,6 +1424,177 @@ export function DashboardClient() {
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <CardTitle>Cross-stock comparison</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Ranks your saved reviews for TSLA, NVDA, AMZN, and SPACEX so you can see which
+                one looks strongest for the current A$600 budget. Use the batch button to
+                prepare them all in one pass.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">Review month {codexReviewMonth}</Badge>
+              <Button
+                disabled={comparisonLoading || isPreparingComparisonReviews || isFetchingCodexArticles}
+                onClick={fetchAllComparisonNews}
+                size="sm"
+                variant="default"
+              >
+                {isFetchingCodexArticles ? "Fetching all..." : "Fetch all news"}
+                <RefreshCw className={cn("h-4 w-4", isFetchingCodexArticles && "animate-spin")} />
+              </Button>
+              <Button
+                disabled={comparisonLoading || isPreparingComparisonReviews || isFetchingCodexArticles}
+                onClick={prepareAllComparisonReviewBundles}
+                size="sm"
+                variant="default"
+              >
+                {isPreparingComparisonReviews ? "Preparing all..." : "Prepare all bundles"}
+                <FileText className="h-4 w-4" />
+              </Button>
+              <Button
+                disabled={comparisonLoading}
+                onClick={refreshComparisonReviews}
+                size="sm"
+                variant="outline"
+              >
+                {comparisonLoading ? "Refreshing..." : "Refresh comparison"}
+                <RefreshCw className={cn("h-4 w-4", comparisonLoading && "animate-spin")} />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-lg border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">Status:</span>{" "}
+              {fetchedComparisonCount}/4 fetched this month, {preparedComparisonCount}/4 bundles ready,{" "}
+              {reviewedComparisonCount}/4 published.{" "}
+              {" "}
+              {comparisonStatusRows
+                .map((item) => {
+                  if (item.reviewed) {
+                    return `${item.symbol} published`;
+                  }
+                  if (item.prepared) {
+                    return `${item.symbol} bundle ready`;
+                  }
+                  if (item.fetched) {
+                    return `${item.symbol} fetched`;
+                  }
+                  return `${item.symbol} pending`;
+                })
+                .join(" · ")}
+            </div>
+            {comparisonLoading ? (
+              <div className="rounded-lg border bg-muted/20 p-4 text-sm text-muted-foreground">
+                Loading comparison reviews...
+              </div>
+            ) : null}
+            {comparisonError ? (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+                {comparisonError}
+              </div>
+            ) : null}
+            <div className="rounded-lg border bg-background p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium">
+                    {bestComparisonReview
+                      ? bestComparisonReview.rankScore >= 0
+                        ? `${bestComparisonReview.symbol} looks strongest right now`
+                        : `${bestComparisonReview.symbol} is the least weak review right now`
+                      : "No published comparison review yet"}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {bestComparisonReview?.codexReview?.suggestedGuideImpact?.rationale ??
+                      "Prepare and publish the four stock reviews to get a ranked recommendation."}
+                  </p>
+                </div>
+                {bestComparisonReview ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="secondary">{stockReviewVerdict(bestComparisonReview.rankScore)}</Badge>
+                    <Badge variant="outline">Score {bestComparisonReview.rankScore.toFixed(2)}</Badge>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            <div className="grid gap-3 xl:grid-cols-2">
+              {comparisonReviews.map((item) => {
+                const digest = item.codexReview?.appliedNewsDigest;
+                return (
+                  <div className="rounded-lg border bg-background p-4" key={item.symbol}>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-sm font-medium">{item.symbol}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {item.status === "loaded"
+                            ? `Loaded ${item.generatedAt ? formatDisplayDate(item.generatedAt.slice(0, 10)) : "review"}`
+                            : item.status === "prepared"
+                              ? "Bundle ready, not published yet"
+                              : item.status === "missing"
+                                ? "No bundle found yet"
+                                : item.error ?? "Could not load review"}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant={digest?.signal === "positive" ? "success" : digest?.signal === "negative" ? "warning" : "secondary"}>
+                          {digest?.signal ? newsSignalLabel(digest.signal) : item.status === "prepared" ? "Ready" : "Pending"}
+                        </Badge>
+                        <Badge variant="outline">
+                          {item.status === "prepared" && !digest ? "Bundle ready" : `Score ${item.rankScore.toFixed(2)}`}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-2 text-sm">
+                      <DetailRow
+                        label="Confidence"
+                          value={digest?.confidence ? digest.confidence : item.status === "prepared" ? "Pending publish" : "Pending"}
+                      />
+                      <DetailRow
+                        label="Signal mix"
+                        value={
+                          digest
+                            ? `${digest.positiveArticleCount ?? 0} / ${digest.negativeArticleCount ?? 0} / ${digest.neutralArticleCount ?? 0}`
+                            : item.status === "prepared"
+                              ? "Pending publish"
+                              : "Pending"
+                        }
+                      />
+                      <DetailRow
+                        label="Material items"
+                        value={
+                          digest?.materialArticleCount !== undefined
+                            ? String(digest.materialArticleCount)
+                            : item.status === "prepared"
+                              ? "Pending publish"
+                              : "Pending"
+                        }
+                      />
+                      <DetailRow
+                        label="Suggested tilt"
+                        value={
+                          item.codexReview?.suggestedGuideImpact?.depositSuggestion ??
+                          (item.status === "prepared" ? "Review Latest" : "Prepare bundle")
+                        }
+                      />
+                    </div>
+                    <p className="mt-3 text-sm text-muted-foreground">
+                      {item.codexReview?.suggestedGuideImpact?.rationale ??
+                        item.codexReview?.rationale ??
+                        "No review rationale saved yet."}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Higher scores mean the review is pointing more toward the A$600 budget. If the
+              review is missing, publish it first and the panel will rank it automatically.
+            </p>
+          </CardContent>
+        </Card>
+
         {settings.studyLoanEnabled ? (
           <Card>
             <CardHeader>
@@ -1089,13 +1613,7 @@ export function DashboardClient() {
                 decision={currentMonthSchoolDecision}
                 formatAud={displayAudValue}
               />
-              <div className="grid gap-3 md:grid-cols-3">
-                <PlainMetric
-                  label="Current month AAPL target"
-                  value={displayAudValue(depositGuide.recommendedDepositAud)}
-                  note={`Guardrail range ${displayAudValue(depositGuide.minThisMonthAud)} to ${displayAudValue(depositGuide.maxThisMonthAud)}.`}
-                  tip="This is the suggested amount to put into AAPL this month. It is the cash-flow amount used in the school-decision comparison."
-                />
+              <div className="grid gap-3 md:grid-cols-2">
                 <PlainMetric
                   label="Projected paid-off range"
                   value={schoolPayoffRange}
@@ -1387,6 +1905,34 @@ function articleReviewTimestamp(article: {
   return article.collectedAt || article.cachedAt || article.publishedAt || "";
 }
 
+function scoreStockReview(review?: CodexReviewDetails) {
+  if (!review?.appliedNewsDigest) {
+    return -999;
+  }
+
+  const digest = review.appliedNewsDigest;
+  const signalWeight =
+    digest.signal === "positive" ? 1 : digest.signal === "negative" ? -1 : 0;
+  const confidenceWeight =
+    digest.confidence === "high" ? 0.35 : digest.confidence === "medium" ? 0.15 : 0;
+  const adjustmentWeight =
+    typeof review.suggestedGuideImpact?.expectedAdjustmentPercent === "number"
+      ? review.suggestedGuideImpact.expectedAdjustmentPercent / 12
+      : 0;
+  const rawScore = (digest.score ?? 0) + signalWeight * 0.6 + confidenceWeight + adjustmentWeight;
+  return Math.round(rawScore * 100) / 100;
+}
+
+function stockReviewVerdict(score: number) {
+  if (score >= 1) {
+    return "Best fit";
+  }
+  if (score <= -1) {
+    return "Weak fit";
+  }
+  return "Mixed";
+}
+
 function articleDisplayTimestamp(article: {
   collectedAt?: string;
   cachedAt?: string;
@@ -1473,6 +2019,88 @@ function isPresent(value: string | undefined): value is string {
   return Boolean(value?.trim());
 }
 
+function reviewerDraftStorageKey(symbol: string) {
+  return `codex-reviewer-draft:${symbol.toUpperCase()}`;
+}
+
+function createReviewerDraft(symbol: string): ReviewerDraft {
+  const profile = getCompanyReviewProfile(symbol);
+  return {
+    role: "Thesis Impact Analyst",
+    mandate:
+      "Review each article like a senior fundamental equity analyst deciding whether the news meaningfully changes an investment thesis.",
+    posture: "Skeptical, evidence-weighted, and conservative about turning headlines into material signals.",
+    companyName: profile.companyName,
+    sector: profile.sector,
+    thesisDrivers: profile.thesisDrivers.join("\n"),
+    keyRisks: profile.keyRisks.join("\n"),
+    materialityKeywords: profile.materialityKeywords.join("\n"),
+  };
+}
+
+function loadReviewerDraft(symbol: string): ReviewerDraft {
+  const fallback = createReviewerDraft(symbol);
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+  try {
+    const raw = window.localStorage.getItem(reviewerDraftStorageKey(symbol));
+    if (!raw) {
+      return fallback;
+    }
+    const parsed = JSON.parse(raw) as Partial<ReviewerDraft>;
+    return {
+      role: typeof parsed.role === "string" ? parsed.role : fallback.role,
+      mandate: typeof parsed.mandate === "string" ? parsed.mandate : fallback.mandate,
+      posture: typeof parsed.posture === "string" ? parsed.posture : fallback.posture,
+      companyName: typeof parsed.companyName === "string" ? parsed.companyName : fallback.companyName,
+      sector: typeof parsed.sector === "string" ? parsed.sector : fallback.sector,
+      thesisDrivers:
+        typeof parsed.thesisDrivers === "string" ? parsed.thesisDrivers : fallback.thesisDrivers,
+      keyRisks: typeof parsed.keyRisks === "string" ? parsed.keyRisks : fallback.keyRisks,
+      materialityKeywords:
+        typeof parsed.materialityKeywords === "string"
+          ? parsed.materialityKeywords
+          : fallback.materialityKeywords,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function persistReviewerDraft(symbol: string, reviewerDraft: ReviewerDraft) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(reviewerDraftStorageKey(symbol), JSON.stringify(reviewerDraft));
+  } catch {
+    // Ignore storage failures so review prep still works.
+  }
+}
+
+function reviewerDraftToContext(reviewerDraft: ReviewerDraft): ReviewerContextOverride {
+  return {
+    role: reviewerDraft.role.trim(),
+    mandate: reviewerDraft.mandate.trim(),
+    posture: reviewerDraft.posture.trim(),
+    companyContext: {
+      companyName: reviewerDraft.companyName.trim(),
+      sector: reviewerDraft.sector.trim(),
+      thesisDrivers: splitReviewerLines(reviewerDraft.thesisDrivers),
+      keyRisks: splitReviewerLines(reviewerDraft.keyRisks),
+      materialityKeywords: splitReviewerLines(reviewerDraft.materialityKeywords),
+    },
+  };
+}
+
+function splitReviewerLines(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 function guideLabel(direction: "increase" | "hold" | "decrease") {
   if (direction === "increase") {
     return "Lean higher";
@@ -1536,6 +2164,126 @@ function calculateCurrentMonthContributionAud(
         }
         return total + contribution.amountUsd * latestUsdToAudRate;
       }, 0),
+  );
+}
+
+function ReviewerCharterEditor({
+  symbol,
+  version,
+  onDraftChange,
+}: {
+  symbol: string;
+  version: string;
+  onDraftChange: (draft: ReviewerDraft) => void;
+}) {
+  const [draft, setDraft] = useState(() => loadReviewerDraft(symbol));
+
+  useEffect(() => {
+    persistReviewerDraft(symbol, draft);
+    onDraftChange(draft);
+  }, [draft, onDraftChange, symbol]);
+
+  return (
+    <div className="mt-4 rounded-lg border bg-muted/20 p-4">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-medium">Reviewer charter</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            This draft is injected into every review bundle for {symbol} and saved locally in this browser.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="secondary">{draft.role || "Thesis Impact Analyst"}</Badge>
+          <Badge variant="outline">v{version}</Badge>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <Field label="Role">
+          <Input value={draft.role} onChange={(event) => setDraft((current) => ({ ...current, role: event.target.value }))} />
+        </Field>
+        <Field label="Posture">
+          <Input
+            value={draft.posture}
+            onChange={(event) => setDraft((current) => ({ ...current, posture: event.target.value }))}
+          />
+        </Field>
+        <div className="md:col-span-2">
+          <Field label="Mandate">
+            <Textarea
+              className="min-h-24"
+              value={draft.mandate}
+              onChange={(event) => setDraft((current) => ({ ...current, mandate: event.target.value }))}
+            />
+          </Field>
+        </div>
+        <Field label="Company name">
+          <Input
+            value={draft.companyName}
+            onChange={(event) => setDraft((current) => ({ ...current, companyName: event.target.value }))}
+          />
+        </Field>
+        <Field label="Sector">
+          <Input
+            value={draft.sector}
+            onChange={(event) => setDraft((current) => ({ ...current, sector: event.target.value }))}
+          />
+        </Field>
+        <div className="md:col-span-2">
+          <Field label="Thesis drivers">
+            <Textarea
+              className="min-h-24"
+              value={draft.thesisDrivers}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, thesisDrivers: event.target.value }))
+              }
+              placeholder="One driver per line"
+            />
+          </Field>
+        </div>
+        <div className="md:col-span-2">
+          <Field label="Key risks">
+            <Textarea
+              className="min-h-24"
+              value={draft.keyRisks}
+              onChange={(event) => setDraft((current) => ({ ...current, keyRisks: event.target.value }))}
+              placeholder="One risk per line"
+            />
+          </Field>
+        </div>
+        <div className="md:col-span-2">
+          <Field label="Materiality keywords">
+            <Textarea
+              className="min-h-24"
+              value={draft.materialityKeywords}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, materialityKeywords: event.target.value }))
+              }
+              placeholder="One keyword per line"
+            />
+          </Field>
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button onClick={() => setDraft(createReviewerDraft(symbol))} size="sm" variant="outline">
+          Reset to stock profile
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="grid gap-2">
+      <Label>{label}</Label>
+      {children}
+    </div>
   );
 }
 
@@ -1726,12 +2474,10 @@ function SchoolMonthSummary({
     <div className="rounded-lg border bg-background p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-medium">Current month verdict</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            This is a net-worth check for the current month.
-          </p>
+          <p className="text-sm font-medium">School decision</p>
+          <p className="mt-1 text-sm text-muted-foreground">This is a net-worth check for today.</p>
         </div>
-        <InfoTip title="Current month verdict">
+        <InfoTip title="School decision">
           <p>
             In plain terms: keep AAPL counts the old AAPL holding value, then
             subtracts this month&apos;s school repayment. Pay off and rebuild counts
@@ -1806,7 +2552,7 @@ function SchoolVerdictCard({
           title="Pay off + rebuild"
           value={formatAud(decision.cashOutRebuildNetAud)}
           lines={[
-            `This month's AAPL target: ${formatAud(decision.aaplDepositAud)}`,
+            `Guided deposit: ${formatAud(decision.aaplDepositAud)}`,
             `Still to log this month: ${formatAud(decision.currentMonthDepositTopUpAud)}`,
             `Logged AAPL value: ${formatAud(decision.rebuildAssetValueAud)}`,
             `Remaining debt after payoff: -${formatAud(decision.debtAfterPayoffAud)}`,

@@ -5,6 +5,7 @@ import {
   reviewMonthSchema,
   symbolSchema,
 } from "@/lib/news/codexReviewSchemas";
+import { writeLocalCodexReviewBundle } from "@/lib/news/codexReviewLocalStore";
 import { getSharedNewsConfig } from "@/lib/shared-news/config";
 import { upsertSharedCodexReview } from "@/lib/shared-news/store";
 
@@ -30,21 +31,53 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const saved = await upsertSharedCodexReview(parsed.data);
-    if (!saved.enabled) {
-      return noStoreJson(
-        { error: "Shared Codex review sync is not configured on this deployment." },
-        { status: 503 },
-      );
-    }
-    return noStoreJson({
-      saved: true,
-      reviewMonth: saved.reviewMonth,
-      filename: saved.filename,
-      generatedAt: saved.generatedAt,
-      includedArticleCount: saved.includedArticleCount,
-      sourceUpdatedAt: saved.sourceUpdatedAt,
+    const localSaved = await writeLocalCodexReviewBundle({
+      symbol: parsed.data.symbol,
+      reviewMonth: parsed.data.reviewMonth,
+      filename: parsed.data.filename,
+      generatedAt: parsed.data.generatedAt,
+      includedArticleCount: parsed.data.includedArticleCount,
+      codexReview: parsed.data.codexReview,
     });
+
+    try {
+      const saved = await upsertSharedCodexReview(parsed.data);
+      if (!saved.enabled) {
+        return noStoreJson({
+          saved: true,
+          storedLocally: true,
+          reviewMonth: parsed.data.reviewMonth,
+          filename: localSaved.filename,
+          generatedAt: parsed.data.generatedAt || localSaved.bundle.generatedAt,
+          includedArticleCount: parsed.data.includedArticleCount,
+          sourceUpdatedAt: parsed.data.sourceUpdatedAt,
+          syncState: "local-only",
+        });
+      }
+
+      return noStoreJson({
+        saved: true,
+        storedLocally: true,
+        reviewMonth: saved.reviewMonth,
+        filename: saved.filename || localSaved.filename,
+        generatedAt: saved.generatedAt,
+        includedArticleCount: saved.includedArticleCount,
+        sourceUpdatedAt: saved.sourceUpdatedAt,
+        syncState: "shared-and-local",
+      });
+    } catch (error) {
+      return noStoreJson({
+        saved: true,
+        storedLocally: true,
+        reviewMonth: parsed.data.reviewMonth,
+        filename: localSaved.filename,
+        generatedAt: parsed.data.generatedAt || localSaved.bundle.generatedAt,
+        includedArticleCount: parsed.data.includedArticleCount,
+        sourceUpdatedAt: parsed.data.sourceUpdatedAt,
+        syncState: "local-only",
+        syncError: error instanceof Error ? error.message : "Shared Codex review sync failed.",
+      });
+    }
   } catch (error) {
     return noStoreJson(
       {

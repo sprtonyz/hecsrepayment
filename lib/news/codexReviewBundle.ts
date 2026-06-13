@@ -1,3 +1,6 @@
+
+import type { ReviewerSpec } from "@/lib/news/reviewerSpec";
+
 type ReviewBundleArticle = {
   id: string;
   title: string;
@@ -37,6 +40,7 @@ type BuildCodexReviewBriefInput = {
   requestedArticleCount: number;
   includedArticleCount: number;
   guideContext?: Record<string, unknown>;
+  reviewerSpec?: ReviewerSpec;
   articles: ReviewBundleArticle[];
 };
 
@@ -48,13 +52,14 @@ export function buildCodexReviewBrief({
   requestedArticleCount,
   includedArticleCount,
   guideContext,
+  reviewerSpec,
   articles,
 }: BuildCodexReviewBriefInput) {
   const duplicateGroupByArticleId = duplicateGroupsByArticleId(articles);
   const articleReviewTable = articles.map((article) => {
     const duplicateGroup = duplicateGroupByArticleId.get(article.id);
     const likelyNoiseFlags = buildLikelyNoiseFlags(article, duplicateGroup);
-    const durableThemeHints = buildDurableThemeHints(article);
+    const durableThemeHints = buildDurableThemeHints(article, reviewerSpec);
 
     return {
       id: article.id,
@@ -93,9 +98,10 @@ export function buildCodexReviewBrief({
 
   return {
     purpose:
-      "Start here before reading full excerpts. Use this brief to separate durable AAPL thesis signals from repeated links, summary-only items, and short-term market noise.",
+      `Start here before reading full excerpts. Use this brief to separate durable ${symbol.toUpperCase()} thesis signals from repeated links, summary-only items, and short-term market noise.`,
     symbol: symbol.toUpperCase(),
     reviewMonth,
+    reviewerProfile: buildReviewerProfile(reviewerSpec),
     guideSnapshot: buildGuideSnapshot(guideContext),
     coverage: {
       requestedArticleCount,
@@ -111,9 +117,10 @@ export function buildCodexReviewBrief({
     duplicateGroups: buildDuplicateGroups(articles),
     articleReviewTable,
     suggestedReviewFlow: [
+      "Read reviewerProfile first so the standing analyst charter and company context are in view before triage.",
       "Read guideSnapshot and coverage first to understand what the app was going to do before this review.",
       "Use articleReviewTable.reviewPriority to triage the bundle before opening long readableTextExcerpt fields.",
-      "Downweight rows with likelyNoiseFlags unless their excerpt reveals a direct Apple business impact.",
+      "Downweight rows with likelyNoiseFlags unless their excerpt reveals a direct company business impact.",
       "For durableThemeHints, check the full excerpt and decide whether the guide signal, confidence, or deposit suggestion should change.",
       "If a codexReview already exists in this file, update it only if the new bundle evidence changes the materiality call.",
     ],
@@ -139,6 +146,23 @@ function buildGuideSnapshot(guideContext: Record<string, unknown> | undefined) {
     selectedNewsDigest: summarizeDigest(objectValue(newsContext, "selectedDigest")),
     headlineDigest: summarizeDigest(objectValue(newsContext, "headlineDigest")),
     aiDigest: summarizeDigest(objectValue(newsContext, "aiDigest")),
+  };
+}
+
+function buildReviewerProfile(reviewerSpec: ReviewerSpec | undefined) {
+  if (!reviewerSpec) {
+    return undefined;
+  }
+
+  return {
+    version: reviewerSpec.version,
+    role: reviewerSpec.role,
+    mandate: reviewerSpec.mandate,
+    posture: reviewerSpec.posture,
+    operatingPrinciples: reviewerSpec.operatingPrinciples,
+    materialityTest: reviewerSpec.materialityTest,
+    confidenceRules: reviewerSpec.confidenceRules,
+    companyContext: reviewerSpec.companyContext,
   };
 }
 
@@ -229,21 +253,29 @@ function buildLikelyNoiseFlags(article: ReviewBundleArticle, duplicateGroup: str
   return flags;
 }
 
-function buildDurableThemeHints(article: ReviewBundleArticle) {
+function buildDurableThemeHints(article: ReviewBundleArticle, reviewerSpec?: ReviewerSpec) {
   const text = `${article.title} ${article.summary ?? ""}`.toLowerCase();
   const hints: string[] = [];
+  const companyKeywords = reviewerSpec?.companyContext.materialityKeywords ?? [];
+  const companyKeywordHit = companyKeywords.some((keyword) => keyword && text.includes(keyword.toLowerCase()));
 
-  if (/\b(app store|fortnite|epic|antitrust|lawsuit|court|regulator|commission|fee)\b/.test(text)) {
+  if (companyKeywordHit) {
+    hints.push("company-specific");
+  }
+  if (/\b(app store|antitrust|lawsuit|court|regulator|commission|fee|doj|ftc|dma)\b/.test(text)) {
     hints.push("legal-regulatory");
   }
-  if (/\b(ai|apple intelligence|siri|smart glasses|eyewear|xr)\b/.test(text)) {
+  if (/\b(ai|artificial intelligence|cloud|chip|model|assistant|automation)\b/.test(text)) {
     hints.push("ai-product-competition");
   }
-  if (/\b(services|apple tv|sports|formula one|f1|world cup|app store)\b/.test(text)) {
-    hints.push("services-growth");
+  if (/\b(services|subscriptions|recurring revenue|platform|advertising|cloud)\b/.test(text)) {
+    hints.push("recurring-revenue");
   }
-  if (/\b(earnings|revenue|sales|iphone|margin|valuation|p\/e|premium)\b/.test(text)) {
+  if (/\b(earnings|revenue|sales|margin|valuation|p\/e|guidance|buyback|capital return)\b/.test(text)) {
     hints.push("fundamentals-valuation");
+  }
+  if (/\b(supply chain|manufacturing|tariff|china|inventory|logistics|component)\b/.test(text)) {
+    hints.push("supply-chain");
   }
 
   return Array.from(new Set(hints));
@@ -255,7 +287,11 @@ function reviewPriority(
   durableThemeHints: string[],
 ) {
   const apiMateriality = article.existingApiAnalysis?.materiality;
-  if (apiMateriality === "high" || durableThemeHints.includes("legal-regulatory")) {
+  if (
+    apiMateriality === "high" ||
+    durableThemeHints.includes("legal-regulatory") ||
+    durableThemeHints.includes("company-specific")
+  ) {
     return "high";
   }
   if (apiMateriality === "medium" || durableThemeHints.length > 0) {

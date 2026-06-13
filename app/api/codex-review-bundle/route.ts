@@ -133,16 +133,18 @@ export async function POST(request: NextRequest) {
   await mkdir(path.dirname(absolutePath), { recursive: true });
   await writeFile(absolutePath, `${JSON.stringify(result.bundle, null, 2)}\n`, "utf8");
 
-  return NextResponse.json({
-    path: absolutePath,
-    filename,
-    includedArticleCount: result.includedArticleCount,
-    reviewBrief: {
-      duplicateGroupCount: result.reviewBrief.coverage.duplicateGroupCount,
-      likelyNoiseArticleCount: result.reviewBrief.coverage.likelyNoiseArticleCount,
-      articleTextStatusCounts: result.reviewBrief.coverage.articleTextStatusCounts,
-    },
-    generatedAt: result.generatedAt,
+    return NextResponse.json({
+      path: absolutePath,
+      filename,
+      includedArticleCount: result.includedArticleCount,
+      reviewerProfile: result.reviewBrief.reviewerProfile,
+      reviewBrief: {
+        reviewerProfile: result.reviewBrief.reviewerProfile,
+        duplicateGroupCount: result.reviewBrief.coverage.duplicateGroupCount,
+        likelyNoiseArticleCount: result.reviewBrief.coverage.likelyNoiseArticleCount,
+        articleTextStatusCounts: result.reviewBrief.coverage.articleTextStatusCounts,
+      },
+      generatedAt: result.generatedAt,
   });
 }
 

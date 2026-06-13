@@ -1,6 +1,7 @@
 import type { CachedNewsAnalysis, CachedNewsArticle } from "@/lib/storage/types";
 import { fetchReadableArticleText } from "@/lib/news/articleText";
 import { buildCodexReviewBrief } from "@/lib/news/codexReviewBundle";
+import { buildReviewerSpec } from "@/lib/news/reviewerSpec";
 
 const DEFAULT_ARTICLE_LIMIT = 40;
 const MAX_BUNDLE_TEXT_CHARS = 8_000;
@@ -43,6 +44,10 @@ export async function buildCodexReviewBundle({
   articleLimit = DEFAULT_ARTICLE_LIMIT,
 }: BuildCodexReviewBundleInput) {
   const normalizedSymbol = symbol.toUpperCase();
+  const reviewerSpec = buildReviewerSpec({
+    symbol: normalizedSymbol,
+    guideContext,
+  });
   const analysesByArticleId = new Map(analyses.map((analysis) => [analysis.articleId, analysis]));
   const selectedArticles = articles
     .filter((article) => article.symbol.toUpperCase() === normalizedSymbol)
@@ -105,6 +110,7 @@ export async function buildCodexReviewBundle({
     requestedArticleCount: articles.length,
     includedArticleCount: articlesWithText.length,
     guideContext,
+    reviewerSpec,
     articles: articlesWithText,
   });
 
@@ -118,7 +124,8 @@ export async function buildCodexReviewBundle({
     includedArticleCount: articlesWithText.length,
     guideContext,
     reviewBrief,
-    instructions: DEFAULT_REVIEW_INSTRUCTIONS,
+    reviewerSpec,
+    instructions: buildReviewInstructions(reviewerSpec),
     codexReview: existingCodexReview,
     articles: articlesWithText,
   };
@@ -190,8 +197,17 @@ function ageBucket(value: string | undefined) {
 }
 
 const DEFAULT_REVIEW_INSTRUCTIONS = [
-  "Review this local bundle for the monthly AAPL deposit guide.",
+  "Review this local bundle for the monthly stock review.",
+  "Read reviewerSpec first; it defines the standing analyst charter and company-context overlay for this ticker.",
   "Prioritize durable thesis impact, unresolved legal/regulatory risk, earnings/product/service trends, and material competitive changes.",
-  "Downweight stale market chatter, repeated analyst/price-action articles, tokenization mechanics with no Apple-specific impact, and articles with only summary text.",
+  "Downweight stale market chatter, repeated analyst/price-action articles, tokenization mechanics with no company-specific impact, and articles with only summary text.",
   "Return a concise JSON review that the app can later load: signal, confidence, material items, stale/noisy items, unresolved themes, suggested guide impact, and rationale.",
 ];
+
+function buildReviewInstructions(reviewerSpec: ReturnType<typeof buildReviewerSpec>) {
+  return [
+    ...DEFAULT_REVIEW_INSTRUCTIONS,
+    `Reviewer charter version: ${reviewerSpec.version}.`,
+    `Company context: ${reviewerSpec.companyContext.companyName} (${reviewerSpec.companyContext.symbol}) in ${reviewerSpec.companyContext.sector}.`,
+  ];
+}

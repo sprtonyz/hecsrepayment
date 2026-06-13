@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addMonths, format, parseISO } from "date-fns";
 import { toast } from "sonner";
 import { nowIso, todayIso } from "@/lib/domain/dates";
@@ -77,6 +77,19 @@ function emptySnapshot(): TrackerSnapshot {
     fxRates: [],
     newsArticles: [],
     newsAnalyses: [],
+  };
+}
+
+function hasCoreTrackerData(snapshot: Partial<TrackerSnapshot>) {
+  return Boolean(snapshot.settings && (snapshot.saleEvents?.length || 0) > 0);
+}
+
+function pickCoreTrackerSnapshot(snapshot: TrackerSnapshot): Partial<TrackerSnapshot> {
+  return {
+    settings: snapshot.settings,
+    saleEvents: snapshot.saleEvents,
+    contributions: snapshot.contributions,
+    trades: snapshot.trades,
   };
 }
 
@@ -168,6 +181,45 @@ type NewsAnalysisApiResponse = {
   failures?: Array<{ articleId: string; message: string }>;
   message?: string;
 };
+
+type NewsRefreshResult = {
+  articleCount: number;
+  savedAnalysisCount: number;
+  analysisFailureCount: number;
+};
+
+type SharedTrackerSnapshotResponse = {
+  enabled: boolean;
+  snapshot?: Partial<TrackerSnapshot>;
+  updatedAt?: string;
+  message?: string;
+};
+
+async function fetchSharedTrackerSnapshot() {
+  try {
+    const response = await fetch("/api/tracker-sync", { cache: "no-store" });
+    if (!response.ok) {
+      return undefined;
+    }
+    return (await response.json()) as SharedTrackerSnapshotResponse;
+  } catch {
+    return undefined;
+  }
+}
+
+async function saveSharedTrackerSnapshot(snapshot: Partial<TrackerSnapshot>) {
+  try {
+    await fetch("/api/tracker-sync", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(snapshot),
+    });
+  } catch {
+    // Cloud sync is optional. Local storage remains the source of truth.
+  }
+}
 
 function isRecentIso(value: string | undefined, maxAgeHours: number) {
   if (!value) {
@@ -290,16 +342,87 @@ async function saveNewsRefresh({
   };
 }
 
+async function fetchAndStoreNewsArticles({
+  symbol,
+  snapshot,
+  load,
+  setLastNewsRefreshAt,
+  refreshWarning,
+}: {
+  symbol: string;
+  snapshot: TrackerSnapshot;
+  load: () => Promise<void>;
+  setLastNewsRefreshAt: (value: string) => void;
+  refreshWarning?: (value: string | undefined) => void;
+}): Promise<NewsRefreshResult> {
+  const response = await fetch(`/api/news?symbol=${encodeURIComponent(symbol)}`, {
+    cache: "no-store",
+  });
+  const data = (await response.json().catch(() => ({}))) as NewsApiResponse & {
+    error?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(data.error || `Could not fetch ${symbol} articles.`);
+  }
+
+  const cachedAt = nowIso();
+  setLastNewsRefreshAt(cachedAt);
+  const result = await saveNewsRefresh({
+    data,
+    symbol,
+    cachedAt,
+    existingArticles: snapshot.newsArticles || [],
+    existingAnalyses: snapshot.newsAnalyses || [],
+  });
+
+  await load();
+  notifyTrackerDataChanged();
+  if (result.analysisFailureCount > 0) {
+    const message = `${symbol} articles were fetched, but some AI article analyses failed.`;
+    refreshWarning?.(message);
+    toast.warning(message);
+  } else if (data.sharedSync?.enabled && data.sharedSync.synced) {
+    toast.success(
+      `Fetched ${result.articleCount} ${symbol} article${
+        result.articleCount === 1 ? "" : "s"
+      } and synced them for Review Latest`,
+    );
+  } else if (data.sharedSync?.enabled && !data.sharedSync.synced) {
+    const message =
+      data.sharedSync.message ||
+      `Fetched ${symbol} articles, but shared review sync did not complete.`;
+    refreshWarning?.(message);
+    toast.warning(message);
+  } else {
+    toast.success(`Fetched ${result.articleCount} ${symbol} article${result.articleCount === 1 ? "" : "s"}`);
+  }
+
+  return result;
+}
+
 export function useTrackerData() {
   const [snapshot, setSnapshot] = useState<TrackerSnapshot>(emptySnapshot());
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [warning, setWarning] = useState<string | undefined>();
   const [lastNewsRefreshAt, setLastNewsRefreshAt] = useState<string | undefined>();
+  const lastSyncedCoreSnapshotRef = useRef<string>("");
 
   const load = useCallback(async () => {
     setIsLoading(true);
     const next = await indexedDbAdapter.getSnapshot();
+    if (!hasCoreTrackerData(next)) {
+      const shared = await fetchSharedTrackerSnapshot();
+      if (shared?.enabled && shared.snapshot && hasCoreTrackerData(shared.snapshot)) {
+        await indexedDbAdapter.importSnapshot(shared.snapshot as TrackerSnapshot);
+        const hydrated = await indexedDbAdapter.getSnapshot();
+        setSnapshot(hydrated);
+        setIsLoading(false);
+        return;
+      }
+    }
+
     setSnapshot(next);
     setIsLoading(false);
   }, []);
@@ -317,6 +440,22 @@ export function useTrackerData() {
       window.removeEventListener(TRACKER_DATA_CHANGED_EVENT, handleChange);
     };
   }, [load]);
+
+  const coreSnapshot = useMemo(() => pickCoreTrackerSnapshot(snapshot), [snapshot]);
+  const coreSnapshotSignature = useMemo(() => JSON.stringify(coreSnapshot), [coreSnapshot]);
+
+  useEffect(() => {
+    if (isLoading || !hasCoreTrackerData(coreSnapshot)) {
+      return;
+    }
+
+    if (lastSyncedCoreSnapshotRef.current === coreSnapshotSignature) {
+      return;
+    }
+
+    lastSyncedCoreSnapshotRef.current = coreSnapshotSignature;
+    void saveSharedTrackerSnapshot(coreSnapshot);
+  }, [coreSnapshot, coreSnapshotSignature, isLoading]);
 
   const settings = useMemo(
     () => ({
@@ -639,7 +778,7 @@ export function useTrackerData() {
   );
 
   const refreshMarketData = useCallback(
-    async (force = false) => {
+    async (force = false, options?: { silent?: boolean }) => {
       const activeSale = snapshot.saleEvents[0];
       const symbol = settings.baseTicker || "AAPL";
       const asOfDate = todayIso();
@@ -794,9 +933,13 @@ export function useTrackerData() {
         if (hadRefreshIssue) {
           const message = "Some market, FX, or news requests failed. Showing cached values where available.";
           setWarning(message);
-          toast.warning("Using cached data where needed");
+          if (!options?.silent) {
+            toast.warning("Using cached data where needed");
+          }
         } else {
-          toast.success("Prices and news refreshed");
+          if (!options?.silent) {
+            toast.success("Prices and news refreshed");
+          }
         }
       } catch (error) {
         const message =
@@ -804,7 +947,9 @@ export function useTrackerData() {
             ? error.message
             : "Market data or news refresh failed. Showing last cached values.";
         setWarning(message);
-        toast.warning("Using cached market and news data");
+        if (!options?.silent) {
+          toast.warning("Using cached market and news data");
+        }
       } finally {
         setIsRefreshing(false);
       }
@@ -832,49 +977,13 @@ export function useTrackerData() {
       setWarning(undefined);
 
       try {
-        const response = await fetch(`/api/news?symbol=${encodeURIComponent(symbol)}`, {
-          cache: "no-store",
-        });
-        const data = (await response.json().catch(() => ({}))) as NewsApiResponse & {
-          error?: string;
-        };
-
-        if (!response.ok) {
-          throw new Error(data.error || `Could not fetch ${symbol} articles.`);
-        }
-
-        const cachedAt = nowIso();
-        setLastNewsRefreshAt(cachedAt);
-        const result = await saveNewsRefresh({
-          data,
+        return await fetchAndStoreNewsArticles({
           symbol,
-          cachedAt,
-          existingArticles: snapshot.newsArticles || [],
-          existingAnalyses: snapshot.newsAnalyses || [],
+          snapshot,
+          load,
+          setLastNewsRefreshAt,
+          refreshWarning: setWarning,
         });
-
-        await load();
-        notifyTrackerDataChanged();
-        if (result.analysisFailureCount > 0) {
-          const message = `${symbol} articles were fetched, but some AI article analyses failed.`;
-          setWarning(message);
-          toast.warning(message);
-        } else if (data.sharedSync?.enabled && data.sharedSync.synced) {
-          toast.success(
-            `Fetched ${result.articleCount} ${symbol} article${
-              result.articleCount === 1 ? "" : "s"
-            } and synced them for Review Latest`,
-          );
-        } else if (data.sharedSync?.enabled && !data.sharedSync.synced) {
-          const message =
-            data.sharedSync.message ||
-            `Fetched ${symbol} articles, but shared review sync did not complete.`;
-          setWarning(message);
-          toast.warning(message);
-        } else {
-          toast.success(`Fetched ${result.articleCount} ${symbol} article${result.articleCount === 1 ? "" : "s"}`);
-        }
-        return result;
       } catch (error) {
         const message =
           error instanceof Error ? error.message : `Could not fetch ${symbol} articles.`;
@@ -888,9 +997,57 @@ export function useTrackerData() {
     [
       load,
       settings.baseTicker,
-      snapshot.newsAnalyses,
-      snapshot.newsArticles,
+      snapshot,
     ],
+  );
+
+  const refreshNewsArticlesForSymbols = useCallback(
+    async (symbols: string[]) => {
+      const uniqueSymbols = Array.from(
+        new Set(symbols.map((symbol) => symbol.toUpperCase()).filter(Boolean)),
+      );
+      if (uniqueSymbols.length === 0) {
+        return [];
+      }
+
+      setIsRefreshing(true);
+      setWarning(undefined);
+
+      const results: Array<{ symbol: string; result?: NewsRefreshResult; error?: string }> = [];
+      try {
+        for (const symbol of uniqueSymbols) {
+          try {
+            const result = await fetchAndStoreNewsArticles({
+              symbol,
+              snapshot,
+              load,
+              setLastNewsRefreshAt,
+              refreshWarning: undefined,
+            });
+            results.push({ symbol, result });
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : `Could not fetch ${symbol} articles.`;
+            results.push({ symbol, error: message });
+          }
+        }
+
+        const fetchedSymbols = results.filter((item) => item.result).map((item) => item.symbol);
+        const failedSymbols = results.filter((item) => item.error).map((item) => item.symbol);
+        if (failedSymbols.length > 0) {
+          const message = `Fetched ${fetchedSymbols.join(", ") || "no"} articles; failed for ${failedSymbols.join(", ")}.`;
+          setWarning(message);
+          toast.warning(message);
+        } else if (fetchedSymbols.length > 0) {
+          toast.success(`Fetched ${fetchedSymbols.join(", ")} articles.`);
+        }
+
+        return results;
+      } finally {
+        setIsRefreshing(false);
+      }
+    },
+    [load, snapshot],
   );
 
   const clearNewsCacheForSymbol = useCallback(
@@ -972,6 +1129,7 @@ export function useTrackerData() {
     deleteTrade,
     refreshMarketData,
     refreshNewsArticles,
+    refreshNewsArticlesForSymbols,
     clearNewsCacheForSymbol,
     clearMarketDataCacheForSymbol,
     exportJson,

@@ -31,9 +31,9 @@ The dashboard can also prepare a monthly Codex review bundle from the This Month
 
 For the exact analyst workflow behind the `Review Latest` chat command, read [`REVIEW_LATEST.md`](./REVIEW_LATEST.md). That file is also referenced from `AGENTS.md` so future Codex chats know to use it first.
 
-## Shared Review Sync
+## Shared Sync
 
-If you want to fetch AAPL articles on any device and review them later with Codex on your local machine, enable the shared sync layer:
+If you want the app to keep the setup and core tracker data available across devices, enable the shared sync layer:
 
 1. Create a Supabase project.
 2. Run [`supabase/shared-review-schema.sql`](./supabase/shared-review-schema.sql) in the Supabase SQL editor.
@@ -43,6 +43,7 @@ If you want to fetch AAPL articles on any device and review them later with Code
 
 Once that is configured:
 
+- The deployed app will keep the core tracker snapshot in Supabase so a new phone, tablet, or browser can hydrate the setup instead of starting from scratch.
 - Clicking `Fetch AAPL articles` on the deployed app will still cache locally on that device, and it will also upsert the fetched articles into Supabase.
 - AI article analyses from `/api/news/analyze` will also sync into Supabase when they run.
 - On your local machine, run `npm run review:latest` to pull the latest shared bundle into `data/news-review-queue/YYYY-MM-aapl-codex-review.json`.

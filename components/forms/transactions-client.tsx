@@ -110,7 +110,7 @@ export function TransactionsClient() {
       return;
     }
     autoRefreshKeyRef.current = autoRefreshKey;
-    void refreshMarketData(false);
+    void refreshMarketData(false, { silent: true });
   }, [refreshMarketData, saleEvent, settings.baseTicker, settings.marketDataProvider]);
 
   useEffect(() => {

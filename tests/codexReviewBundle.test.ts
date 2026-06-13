@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildCodexReviewBrief } from "@/lib/news/codexReviewBundle";
+import { buildReviewerSpec } from "@/lib/news/reviewerSpec";
 
 describe("Codex review bundle brief", () => {
   it("summarizes coverage, duplicate groups, noise flags, and durable theme hints", () => {
@@ -94,6 +95,84 @@ describe("Codex review bundle brief", () => {
 
     expect(brief.coverage.duplicateGroupCount).toBe(0);
     expect(brief.articleReviewTable.map((row) => row.likelyNoiseFlags)).toEqual([[], []]);
+  });
+
+  it("includes a reusable reviewer charter and ticker-specific company context", () => {
+    const reviewerSpec = buildReviewerSpec({
+      symbol: "MSFT",
+      guideContext: {
+        reviewerContext: {
+          companyContext: {
+            sector: "Enterprise software and cloud",
+          },
+        },
+      },
+    });
+
+    const brief = buildCodexReviewBrief({
+      symbol: "MSFT",
+      reviewMonth: "2026-05",
+      requestedArticleCount: 1,
+      includedArticleCount: 1,
+      reviewerSpec,
+      articles: [
+        article({
+          id: "msft-1",
+          title: "Microsoft expands Copilot adoption across enterprise customers",
+          source: "Reuters",
+          provider: "googleNews",
+          articleTextStatus: "read",
+        }),
+      ],
+    });
+
+    expect(brief.purpose).toContain("MSFT");
+    expect(brief.reviewerProfile?.role).toBe("Thesis Impact Analyst");
+    expect(brief.reviewerProfile?.companyContext.companyName).toBe("Microsoft");
+    expect(brief.reviewerProfile?.companyContext.sector).toBe("Enterprise software and cloud");
+    expect(brief.suggestedReviewFlow[0]).toContain("reviewerProfile");
+    expect(brief.articleReviewTable[0]?.durableThemeHints).toContain("company-specific");
+  });
+
+  it("falls back to a generic charter when no stock profile exists", () => {
+    const reviewerSpec = buildReviewerSpec({ symbol: "XYZ" });
+
+    expect(reviewerSpec.companyContext.companyName).toBe("XYZ");
+    expect(reviewerSpec.companyContext.sector).toBe("General large-cap public company");
+    expect(reviewerSpec.companyContext.materialityKeywords).toEqual([]);
+  });
+
+  it("supports SpaceX and custom reviewer overrides from the editor", () => {
+    const spacex = buildReviewerSpec({ symbol: "SPACEX" });
+    expect(spacex.companyContext.companyName).toBe("SpaceX");
+    expect(spacex.companyContext.sector).toContain("Space launch");
+
+    const custom = buildReviewerSpec({
+      symbol: "TSLA",
+      guideContext: {
+        reviewerContext: {
+          role: "Tesla red-team analyst",
+          mandate: "Probe whether the article changes vehicle demand, margin, or autonomy thesis.",
+          posture: "Direct and skeptical",
+          companyContext: {
+            companyName: "Tesla, Inc.",
+            sector: "Electric vehicles and autonomy",
+            thesisDrivers: ["Demand", "Margins"],
+            keyRisks: ["Competition", "Execution"],
+            materialityKeywords: ["ev", "autonomy"],
+          },
+        },
+      },
+    });
+
+    expect(custom.role).toBe("Tesla red-team analyst");
+    expect(custom.mandate).toContain("vehicle demand");
+    expect(custom.posture).toBe("Direct and skeptical");
+    expect(custom.companyContext.companyName).toBe("Tesla, Inc.");
+    expect(custom.companyContext.sector).toBe("Electric vehicles and autonomy");
+    expect(custom.companyContext.thesisDrivers).toEqual(["Demand", "Margins"]);
+    expect(custom.companyContext.keyRisks).toEqual(["Competition", "Execution"]);
+    expect(custom.companyContext.materialityKeywords).toEqual(["ev", "autonomy"]);
   });
 });
 
