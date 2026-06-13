@@ -30,6 +30,13 @@ import { Input } from "@/components/ui/input";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   buildHistoricalValueSeries,
@@ -186,6 +193,9 @@ export function DashboardClient() {
   const [comparisonLoading, setComparisonLoading] = useState(true);
   const [comparisonError, setComparisonError] = useState<string | undefined>();
   const [comparisonRefreshTick, setComparisonRefreshTick] = useState(0);
+  const [selectedComparisonSymbol, setSelectedComparisonSymbol] = useState<string | undefined>(
+    () => loadSelectedComparisonSymbol(),
+  );
   const reviewerDraftRef = useRef<ReviewerDraft>(createReviewerDraft(settings.baseTicker));
   const autoRefreshKeyRef = useRef<string | undefined>(undefined);
   const syncReviewerDraftRef = useCallback((draft: ReviewerDraft) => {
@@ -438,7 +448,24 @@ export function DashboardClient() {
     codexReviewLookup?.lookupKey === codexReviewLookupKey
       ? codexReviewLookup.review
       : undefined;
-  const bestComparisonReview = comparisonReviews.find((item) => item.status === "loaded");
+  const loadedComparisonReviews = comparisonReviews.filter((item) => item.status === "loaded");
+  const bestComparisonReview = loadedComparisonReviews[0];
+  const selectedComparisonReview =
+    loadedComparisonReviews.find((item) => item.symbol === selectedComparisonSymbol) ??
+    bestComparisonReview;
+  useEffect(() => {
+    if (!loadedComparisonReviews.length) {
+      return;
+    }
+    const preferredSymbol =
+      selectedComparisonReview?.symbol ?? bestComparisonReview?.symbol ?? loadedComparisonReviews[0]?.symbol;
+    if (preferredSymbol && preferredSymbol !== selectedComparisonSymbol) {
+      setSelectedComparisonSymbol(preferredSymbol);
+    }
+  }, [bestComparisonReview?.symbol, loadedComparisonReviews, selectedComparisonReview?.symbol, selectedComparisonSymbol]);
+  useEffect(() => {
+    persistSelectedComparisonSymbol(selectedComparisonSymbol);
+  }, [selectedComparisonSymbol]);
   const comparisonStatusRows = useMemo(
     () =>
       COMPARISON_SYMBOLS.map((symbol) => {
@@ -461,7 +488,9 @@ export function DashboardClient() {
   const fetchedComparisonCount = comparisonStatusRows.filter((item) => item.fetched).length;
   const preparedComparisonCount = comparisonStatusRows.filter((item) => item.prepared).length;
   const reviewedComparisonCount = comparisonStatusRows.filter((item) => item.reviewed).length;
+  const selectedComparisonDigest = selectedComparisonReview?.codexReview?.appliedNewsDigest;
   const guideNewsDigest =
+    selectedComparisonDigest ??
     codexReviewDigest ??
     (aiNewsDigest.articleCount > 0
       ? {
@@ -532,10 +561,10 @@ export function DashboardClient() {
   });
   const reviewSummarySource = bestComparisonReview?.codexReview
     ? {
-        symbol: bestComparisonReview.symbol,
-        digest: bestComparisonReview.codexReview.appliedNewsDigest ?? guideNewsDigest,
-        codexReview: bestComparisonReview.codexReview,
-        rankScore: bestComparisonReview.rankScore,
+        symbol: selectedComparisonReview?.symbol ?? bestComparisonReview.symbol,
+        digest: guideNewsDigest,
+        codexReview: selectedComparisonReview?.codexReview ?? bestComparisonReview.codexReview,
+        rankScore: selectedComparisonReview?.rankScore ?? bestComparisonReview.rankScore,
       }
     : {
         symbol: settings.baseTicker,
@@ -653,7 +682,6 @@ export function DashboardClient() {
     metrics.rebuildTotalValueUsd < 0 ? rebuildAaplValueUsd : metrics.rebuildTotalValueUsd;
   const hasTrades = snapshot.trades.length > 0;
   const cashNeedsReview = metrics.cashBalanceUsd < -1;
-  const currentPlanText = `${displayAudValue(settings.planMonthlyContributionAud)}/month`;
   const quoteLabel =
     quote?.provider === "manual" ? "manual" : quote?.isDelayed ? "delayed" : "live or cached";
   const fiveYearGapText =
@@ -1263,13 +1291,36 @@ export function DashboardClient() {
           </CardHeader>
           <CardContent className="space-y-4">
             {bestComparisonReview ? (
-              <div className="rounded-lg border bg-background p-4 text-sm text-muted-foreground">
-                <p className="font-medium text-foreground">
-                  Strongest comparison ticket: {bestComparisonReview.symbol}
-                </p>
-                <p className="mt-1">
-                  The main deposit guide uses the strongest published comparison review as a tie-breaker, so the monthly move follows the best cross-stock evidence instead of a single headline.
-                </p>
+              <div className="grid gap-3 rounded-lg border bg-background p-4 text-sm text-muted-foreground md:grid-cols-[1fr_auto] md:items-end">
+                <div>
+                  <p className="font-medium text-foreground">
+                    Strongest comparison ticket: {bestComparisonReview.symbol}
+                  </p>
+                  <p className="mt-1">
+                    The main deposit guide follows the selected comparison ticket, while the rest
+                    of the tickets stay fetched in the background.
+                  </p>
+                </div>
+                <div className="min-w-[220px]">
+                  <Label className="text-xs uppercase text-muted-foreground">
+                    Use this ticket
+                  </Label>
+                  <Select
+                    value={selectedComparisonReview?.symbol ?? bestComparisonReview.symbol}
+                    onValueChange={(value) => setSelectedComparisonSymbol(value)}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Choose ticket" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {loadedComparisonReviews.map((item) => (
+                        <SelectItem key={item.symbol} value={item.symbol}>
+                          {item.symbol}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             ) : null}
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
@@ -1311,13 +1362,6 @@ export function DashboardClient() {
                 <p className="text-sm font-medium">
                   Review summary for {reviewSummarySource.symbol}
                 </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {reviewSummarySource.symbol} is the strongest published comparison review right now.
-                  Confidence tells you how solid the evidence is, signal mix shows the counted
-                  positive/negative/neutral split, material items are the headlines that could
-                  actually change the thesis, and suggested tilt is the final lean after those
-                  inputs are blended.
-                </p>
                 <div className="mt-3 grid gap-3">
                   {guideReviewSummary.map((section) => (
                     <div key={section.label} className="rounded-md border bg-muted/30 p-3">
@@ -1332,16 +1376,6 @@ export function DashboardClient() {
                     </div>
                   ))}
                 </div>
-              </div>
-              <div className="rounded-lg border bg-muted p-4 text-sm text-muted-foreground">
-                The guide uses a 20% guardrail on your {currentPlanText} plan. Confidence changes
-                how far the guide leans higher, lower, or steady inside that range. If you
-                intentionally go lower, up to {displayAudValue(depositGuide.baseFlexAud)} per month is
-                banked for later months. Free RSS headlines are included when available. If OpenAI
-                API access is configured, article text is analyzed once and cached; otherwise the
-                guide stays anchored to headline scoring, price history, and budget flex. This
-                panel exists because it combines the main guide, the strongest comparison ticket,
-                and the review summary in one place.
               </div>
               {settings.showMonthlyCodexReview ? (
                 <div className="rounded-lg border bg-background p-4">
@@ -1463,11 +1497,6 @@ export function DashboardClient() {
                     </div>
                   ) : null}
                 </div>
-              ) : (
-                <div className="rounded-lg border bg-background p-4 text-sm text-muted-foreground">
-                  The monthly Codex workbench is hidden in Settings. Use Review Visibility to show
-                  it again when you want to fetch or prepare the bundle.
-                </div>
               )}
             </div>
           </CardContent>
@@ -1563,7 +1592,19 @@ export function DashboardClient() {
                 </div>
                 {bestComparisonReview ? (
                   <div className="flex flex-wrap gap-2">
-                    <Badge variant="secondary">{stockReviewVerdict(bestComparisonReview.rankScore)}</Badge>
+                    <Badge
+                      variant={
+                        bestComparisonReview.codexReview?.appliedNewsDigest?.signal === "positive"
+                          ? "success"
+                          : bestComparisonReview.codexReview?.appliedNewsDigest?.signal === "negative"
+                            ? "warning"
+                            : "secondary"
+                      }
+                    >
+                      {bestComparisonReview.codexReview?.appliedNewsDigest?.signal
+                        ? newsSignalLabel(bestComparisonReview.codexReview.appliedNewsDigest.signal)
+                        : "Mixed"}
+                    </Badge>
                     <Badge variant="outline">Score {bestComparisonReview.rankScore.toFixed(2)}/10</Badge>
                   </div>
                 ) : null}
@@ -1991,16 +2032,6 @@ function scoreStockReview(review?: CodexReviewDetails) {
   return Math.round(Math.min(10, Math.max(0, rawScore)) * 100) / 100;
 }
 
-function stockReviewVerdict(score: number) {
-  if (score >= 7) {
-    return "Best fit";
-  }
-  if (score <= 4) {
-    return "Weak fit";
-  }
-  return "Mixed";
-}
-
 function articleDisplayTimestamp(article: {
   collectedAt?: string;
   cachedAt?: string;
@@ -2040,7 +2071,7 @@ function buildGuideReviewSummary({
 
   const scoreItems = [
     bestComparisonReview
-      ? `${reviewSymbol} is leading the comparison set with a ${bestComparisonReview.rankScore.toFixed(
+      ? `${reviewSymbol} is the active comparison ticket at ${bestComparisonReview.rankScore.toFixed(
           2,
         )}/10 fit score. In the 10-point framing, 5.0 is neutral, higher is a stronger fit, and lower is weaker.`
       : `Guide score ${guide.signalScore.toFixed(
@@ -2049,9 +2080,9 @@ function buildGuideReviewSummary({
           guide.adjustmentPercent,
         )} vs the neutral plan and a target of ${formatCurrency(guide.recommendedDepositAud, "AUD")}.`,
     bestComparisonReview
-      ? `${reviewSymbol} is the strongest comparison ticket right now at ${bestComparisonReview.rankScore.toFixed(
+      ? `${reviewSymbol} is the selected ticket for the main guide right now at ${bestComparisonReview.rankScore.toFixed(
           2,
-        )}/10, so the main guide uses that cross-stock read as a tie-breaker rather than leaning on a single headline.`
+        )}/10, so the main guide uses that cross-stock read rather than leaning on a single headline.`
       : undefined,
     codexReview?.suggestedGuideImpact?.rationale ?? codexReview?.rationale,
   ].filter(isPresent);
@@ -2105,6 +2136,39 @@ function isPresent(value: string | undefined): value is string {
 
 function reviewerDraftStorageKey(symbol: string) {
   return `codex-reviewer-draft:${symbol.toUpperCase()}`;
+}
+
+function selectedComparisonSymbolStorageKey() {
+  return "codex-comparison-ticket";
+}
+
+function loadSelectedComparisonSymbol() {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  try {
+    const value = window.localStorage.getItem(selectedComparisonSymbolStorageKey());
+    return value?.toUpperCase() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function persistSelectedComparisonSymbol(symbol?: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    if (symbol) {
+      window.localStorage.setItem(selectedComparisonSymbolStorageKey(), symbol.toUpperCase());
+    } else {
+      window.localStorage.removeItem(selectedComparisonSymbolStorageKey());
+    }
+  } catch {
+    // Best effort only.
+  }
 }
 
 function createReviewerDraft(symbol: string): ReviewerDraft {
