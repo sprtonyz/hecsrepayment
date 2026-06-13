@@ -24,9 +24,9 @@ export async function GET() {
         error:
           error instanceof Error
             ? error.message
-            : "Could not read the shared tracker snapshot.",
+            : "Shared tracker snapshot is unavailable.",
       },
-      { status: 500 },
+      { status: 503 },
     );
   }
 }
@@ -58,9 +58,9 @@ export async function POST(request: NextRequest) {
         error:
           error instanceof Error
             ? error.message
-            : "Could not save the shared tracker snapshot.",
+            : "Shared tracker snapshot is unavailable.",
       },
-      { status: 500 },
+      { status: 503 },
     );
   }
 }
