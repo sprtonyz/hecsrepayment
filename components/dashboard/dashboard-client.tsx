@@ -51,6 +51,7 @@ import { formatDisplayDate, todayIso } from "@/lib/domain/dates";
 import { buildAiNewsDigest } from "@/lib/ai/articleAnalysis";
 import { getCompanyReviewProfile } from "@/lib/news/companyReviewProfiles";
 import { isRelevantNewsArticle } from "@/lib/news/relevance";
+import { scoreCodexReviewForComparison } from "@/lib/news/codexReviewRanking";
 import { buildNewsDigest } from "@/lib/news/sentiment";
 import { REVIEWER_SPEC_VERSION, type ReviewerContextOverride } from "@/lib/news/reviewerSpec";
 import { projectCatchUp } from "@/lib/domain/projections";
@@ -387,7 +388,7 @@ export function DashboardClient() {
             filename: payload.filename,
             generatedAt: payload.generatedAt,
             codexReview: review,
-            rankScore: review ? scoreStockReview(review) : 0,
+            rankScore: review ? scoreCodexReviewForComparison(review) : 0,
           } as StockReviewComparisonCard;
         } catch (error) {
           return {
@@ -1096,7 +1097,7 @@ export function DashboardClient() {
   return (
     <AppShell
       title="Dashboard"
-      subtitle="The plain-English view of whether your AAPL rebuild is catching the Had I Held benchmark."
+      subtitle="See whether your rebuild is ahead, behind, or close to the Had I Held benchmark at a glance."
     >
       <div className="space-y-5">
         <section className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.85fr)]">
@@ -1555,7 +1556,7 @@ export function DashboardClient() {
                 <div>
                   <p className="text-sm font-medium">
                     {bestComparisonReview
-                      ? bestComparisonReview.rankScore >= 5
+                      ? bestComparisonReview.rankScore >= 0
                         ? `${bestComparisonReview.symbol} looks strongest right now`
                         : `${bestComparisonReview.symbol} is the least weak review right now`
                       : "No published comparison review yet"}
@@ -1580,15 +1581,15 @@ export function DashboardClient() {
                         ? newsSignalLabel(bestComparisonReview.codexReview.appliedNewsDigest.signal)
                         : "Mixed"}
                     </Badge>
-                    <Badge variant="outline">Score {bestComparisonReview.rankScore.toFixed(2)}/10</Badge>
+                    <Badge variant="outline">Score {bestComparisonReview.rankScore.toFixed(2)}/5</Badge>
                   </div>
                 ) : null}
               </div>
               {bestComparisonReview ? (
                 <div className="mt-3 rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
-                  The score is a 10-point fit score, with 5.0 treated as neutral. It starts from the
-                  review digest score itself, then adds a small boost for positive signal,
-                  confidence, and the suggested tilt before being clipped into the 0 to 10 range.
+                  The score is a signed 5-point fit score from -5 to 5, with 0 treated as neutral.
+                  It starts from the review digest score, then adds a small boost for signal,
+                  confidence, and the suggested tilt before being clipped into the -5 to 5 range.
                 </div>
               ) : null}
             </div>
@@ -1615,7 +1616,7 @@ export function DashboardClient() {
                           {digest?.signal ? newsSignalLabel(digest.signal) : item.status === "prepared" ? "Ready" : "Pending"}
                         </Badge>
                         <Badge variant="outline">
-                          {item.status === "prepared" && !digest ? "Bundle ready" : `Score ${item.rankScore.toFixed(2)}/10`}
+                          {item.status === "prepared" && !digest ? "Bundle ready" : `Score ${item.rankScore.toFixed(2)}/5`}
                         </Badge>
                       </div>
                     </div>
@@ -1988,25 +1989,6 @@ function articleReviewTimestamp(article: {
   return article.collectedAt || article.cachedAt || article.publishedAt || "";
 }
 
-function scoreStockReview(review?: CodexReviewDetails) {
-  if (!review?.appliedNewsDigest) {
-    return -999;
-  }
-
-  const digest = review.appliedNewsDigest;
-  const signalWeight =
-    digest.signal === "positive" ? 1 : digest.signal === "negative" ? -1 : 0;
-  const confidenceWeight =
-    digest.confidence === "high" ? 0.35 : digest.confidence === "medium" ? 0.15 : 0;
-  const adjustmentWeight =
-    typeof review.suggestedGuideImpact?.expectedAdjustmentPercent === "number"
-      ? review.suggestedGuideImpact.expectedAdjustmentPercent / 12
-      : 0;
-  const baseScore = typeof digest.score === "number" ? digest.score : 5;
-  const rawScore = baseScore + signalWeight * 0.6 + confidenceWeight + adjustmentWeight;
-  return Math.round(Math.min(10, Math.max(0, rawScore)) * 100) / 100;
-}
-
 function articleDisplayTimestamp(article: {
   collectedAt?: string;
   cachedAt?: string;
@@ -2048,7 +2030,7 @@ function buildGuideReviewSummary({
     bestComparisonReview
       ? `${reviewSymbol} is the active comparison ticket at ${bestComparisonReview.rankScore.toFixed(
           2,
-        )}/10 fit score. In the 10-point framing, 5.0 is neutral, higher is a stronger fit, and lower is weaker.`
+        )}/5 fit score. In the signed 5-point framing, 0 is neutral, higher is a stronger fit, and lower is weaker.`
       : `Guide score ${guide.signalScore.toFixed(
           2,
         )} is an internal tilt score, not a percent. In the 10-point framing, 5.0 is neutral, higher leans into a bigger monthly deposit, and lower leans into a lighter month. This score produced ${formatSignedPercent(
@@ -2057,7 +2039,7 @@ function buildGuideReviewSummary({
     bestComparisonReview
       ? `${reviewSymbol} is the selected ticket for the main guide right now at ${bestComparisonReview.rankScore.toFixed(
           2,
-        )}/10, so the main guide uses that cross-stock read rather than leaning on a single headline.`
+        )}/5, so the main guide uses that cross-stock read rather than leaning on a single headline.`
       : undefined,
     codexReview?.suggestedGuideImpact?.rationale ?? codexReview?.rationale,
   ].filter(isPresent);

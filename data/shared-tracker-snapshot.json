@@ -1,0 +1,50 @@
+{
+  "snapshot": {
+    "settings": {
+      "id": "singleton",
+      "baseTicker": "AAPL",
+      "displayCurrency": "USD",
+      "baseValuationCurrency": "USD",
+      "contributionPlanCurrency": "AUD",
+      "planMonthlyContributionAud": 600,
+      "planStartDate": "2026-06-14",
+      "planYears": 5,
+      "includeDividends": true,
+      "dividendMode": "cash",
+      "includeSplits": true,
+      "defaultPriceMode": "live",
+      "marketDataProvider": "finnhub",
+      "studyLoanEnabled": true,
+      "studyLoanBalanceAud": 36000,
+      "studyLoanPayoffAmountAud": 36000,
+      "studyLoanMonthlyRepaymentAud": 594,
+      "studyLoanAnnualIncomeAud": 120000,
+      "studyLoanAnnualIndexationRatePercent": 3.2,
+      "studyLoanUseIncomeFormula": false,
+      "studyLoanRedirectFreedRepayment": true,
+      "showMonthlyCodexReview": false,
+      "showReviewerCharter": false,
+      "createdAt": "2026-06-14T09:46:58.931Z",
+      "updatedAt": "2026-06-14T10:17:53.555Z",
+      "manualCurrentPriceUsd": 0
+    },
+    "saleEvents": [
+      {
+        "ticker": "AAPL",
+        "saleDate": "2026-06-14",
+        "sharesSold": 77,
+        "salePricePerShareUsd": 298.1703,
+        "grossProceedsUsd": 22959.11,
+        "feesUsd": 0,
+        "netProceedsUsd": 22959.11,
+        "notes": "",
+        "id": "sale-215d1fa2-39d0-4379-9424-ba1728a8ebad",
+        "createdAt": "2026-06-14T09:46:58.931Z",
+        "updatedAt": "2026-06-14T09:46:58.931Z"
+      }
+    ],
+    "contributions": [],
+    "trades": []
+  },
+  "updatedAt": "2026-06-14T10:50:07.882Z"
+}

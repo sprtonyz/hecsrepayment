@@ -999,8 +999,8 @@ function AssumptionNote({
   text: string;
 }) {
   return (
-    <div className="flex gap-3 rounded-lg border bg-background p-3">
-      <div className="mt-0.5 text-primary">{icon}</div>
+    <div className="flex gap-3 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm shadow-slate-950/5 backdrop-blur-sm">
+      <div className="mt-0.5 rounded-xl bg-primary/10 p-2 text-primary">{icon}</div>
       <div>
         <p className="font-medium">{title}</p>
         <p className="mt-1 text-muted-foreground">{text}</p>
@@ -1052,10 +1052,12 @@ function GuideStat({
   note: string;
 }) {
   return (
-    <div className="min-w-0 rounded-lg border bg-background p-3">
-      <p className="text-xs font-medium uppercase text-muted-foreground">{label}</p>
-      <p className="mt-1 break-words text-lg font-semibold">{value}</p>
-      <p className="mt-1 text-xs text-muted-foreground">{note}</p>
+    <div className="min-w-0 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm shadow-slate-950/5 backdrop-blur-sm">
+      <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-2 break-words text-lg font-semibold">{value}</p>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">{note}</p>
     </div>
   );
 }
@@ -1066,9 +1068,9 @@ function SummarySection({
   section: { label: string; className: string; items: string[] };
 }) {
   return (
-    <div className="rounded-lg border bg-background p-4">
-      <p className={cn("text-sm font-semibold", section.className)}>{section.label}</p>
-      <div className="mt-2 space-y-2 text-sm text-muted-foreground">
+    <div className="rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm shadow-slate-950/5 backdrop-blur-sm">
+      <p className={cn("font-display text-sm font-semibold", section.className)}>{section.label}</p>
+      <div className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
         {section.items.map((item) => (
           <p key={item}>{item}</p>
         ))}
@@ -1080,7 +1082,9 @@ function SummarySection({
 function Detail({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="text-xs font-medium uppercase text-muted-foreground">{label}</p>
+      <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+        {label}
+      </p>
       <p className="mt-1 font-semibold">{value}</p>
     </div>
   );

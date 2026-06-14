@@ -8,12 +8,32 @@ import {
   parseISO,
 } from "date-fns";
 
+const DEFAULT_TIME_ZONE = "Australia/Sydney";
+
 export function todayIso() {
-  return format(new Date(), "yyyy-MM-dd");
+  return isoDateInTimeZone(new Date(), DEFAULT_TIME_ZONE);
 }
 
 export function nowIso() {
   return new Date().toISOString();
+}
+
+export function isoDateInTimeZone(date: Date, timeZone = DEFAULT_TIME_ZONE) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  if (!year || !month || !day) {
+    return format(date, "yyyy-MM-dd");
+  }
+
+  return `${year}-${month}-${day}`;
 }
 
 export function parseDate(date: string) {

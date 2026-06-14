@@ -20,9 +20,10 @@ export function MetricCard({
   return (
     <Card
       className={cn(
-        tone === "positive" && "border-accent bg-accent/40",
-        tone === "warning" && "border-[#f4cf76] bg-[#fff8e7] dark:bg-[#33280f]",
-        tone === "primary" && "border-primary/30 bg-primary/5",
+        tone === "positive" && "border-accent/50 bg-gradient-to-b from-accent/40 to-card/90",
+        tone === "warning" &&
+          "border-[#f4cf76]/70 bg-gradient-to-b from-[#fff8e7] to-card/90 dark:from-[#33280f] dark:to-card/90",
+        tone === "primary" && "border-primary/30 bg-gradient-to-b from-primary/10 to-card/90",
       )}
     >
       <CardHeader className="pb-3">
