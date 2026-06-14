@@ -196,29 +196,77 @@ type SharedTrackerSnapshotResponse = {
   message?: string;
 };
 
+type TrackerSyncState = {
+  state: "loading" | "syncing" | "synced" | "local" | "empty" | "error";
+  label: string;
+  detail?: string;
+  updatedAt?: string;
+};
+
+type SharedTrackerSyncResponse = {
+  enabled?: boolean;
+  synced: boolean;
+  updatedAt?: string;
+  message?: string;
+};
+
 async function fetchSharedTrackerSnapshot() {
   try {
     const response = await fetch("/api/tracker-sync", { cache: "no-store" });
     if (!response.ok) {
-      return undefined;
+      const payload = (await response.json().catch(() => undefined)) as
+        | { error?: string }
+        | undefined;
+      return {
+        enabled: false,
+        message:
+          payload?.error || `Shared tracker snapshot lookup failed with status ${response.status}.`,
+      };
     }
     return (await response.json()) as SharedTrackerSnapshotResponse;
   } catch {
-    return undefined;
+    return {
+      enabled: false,
+      message: "Shared tracker snapshot lookup failed.",
+    };
   }
 }
 
-async function saveSharedTrackerSnapshot(snapshot: Partial<TrackerSnapshot>) {
+async function saveSharedTrackerSnapshot(
+  snapshot: Partial<TrackerSnapshot>,
+): Promise<SharedTrackerSyncResponse | undefined> {
   try {
-    await fetch("/api/tracker-sync", {
+    const response = await fetch("/api/tracker-sync", {
       method: "POST",
       headers: {
         "content-type": "application/json",
       },
+      cache: "no-store",
+      keepalive: true,
       body: JSON.stringify(snapshot),
     });
+
+    const payload = (await response.json().catch(() => undefined)) as
+      | { updatedAt?: string; error?: string }
+      | undefined;
+
+    if (!response.ok) {
+      return {
+        enabled: true,
+        synced: false,
+        updatedAt: payload?.updatedAt,
+        message:
+          payload?.error || `Shared tracker sync failed with status ${response.status}.`,
+      };
+    }
+
+    return {
+      enabled: true,
+      synced: true,
+      updatedAt: payload?.updatedAt,
+    };
   } catch {
-    // Cloud sync is optional. Local storage remains the source of truth.
+    return undefined;
   }
 }
 
@@ -438,10 +486,74 @@ export function useTrackerData() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [warning, setWarning] = useState<string | undefined>();
   const [lastNewsRefreshAt, setLastNewsRefreshAt] = useState<string | undefined>();
+  const [syncState, setSyncState] = useState<TrackerSyncState>({
+    state: "loading",
+    label: "Checking sync",
+  });
   const lastSyncedCoreSnapshotRef = useRef<string>("");
+
+  const syncCoreSnapshot = useCallback(
+    async (coreSnapshot?: Partial<TrackerSnapshot>) => {
+      const nextCoreSnapshot =
+        coreSnapshot || pickCoreTrackerSnapshot(await indexedDbAdapter.getSnapshot());
+
+      if (!hasCoreTrackerData(nextCoreSnapshot)) {
+        return undefined;
+      }
+
+      const signature = JSON.stringify(nextCoreSnapshot);
+      if (lastSyncedCoreSnapshotRef.current === signature) {
+        return undefined;
+      }
+
+      lastSyncedCoreSnapshotRef.current = signature;
+      setSyncState({
+        state: "syncing",
+        label: "Syncing",
+        detail: "Saving tracker to shared storage...",
+      });
+      saveLocalCoreSnapshot(nextCoreSnapshot);
+      const sharedSync = await saveSharedTrackerSnapshot(nextCoreSnapshot);
+
+      if (sharedSync?.enabled && !sharedSync.synced && sharedSync.message) {
+        setWarning(sharedSync.message);
+        setSyncState({
+          state: "error",
+          label: "Sync error",
+          detail: sharedSync.message,
+          updatedAt: sharedSync.updatedAt,
+        });
+      } else if (sharedSync?.synced) {
+        setSyncState({
+          state: "synced",
+          label: "Synced",
+          detail: "Saved to shared storage.",
+          updatedAt: sharedSync.updatedAt,
+        });
+      } else if (sharedSync?.enabled === false) {
+        setSyncState({
+          state: "local",
+          label: "Local only",
+          detail: sharedSync.message || "Shared sync is not available on this deployment.",
+        });
+      }
+
+      return sharedSync;
+    },
+    [],
+  );
 
   const load = useCallback(async () => {
     setIsLoading(true);
+    setSyncState((current) =>
+      current.state === "synced"
+        ? current
+        : {
+            state: "loading",
+            label: "Checking sync",
+            detail: "Loading saved tracker data...",
+          },
+    );
     const next = await indexedDbAdapter.getSnapshot();
     if (!hasCoreTrackerData(next)) {
       const shared = await fetchSharedTrackerSnapshot();
@@ -449,8 +561,28 @@ export function useTrackerData() {
         await indexedDbAdapter.importSnapshot(shared.snapshot as TrackerSnapshot);
         const hydrated = await indexedDbAdapter.getSnapshot();
         setSnapshot(hydrated);
+        setSyncState({
+          state: "synced",
+          label: "Synced",
+          detail: "Loaded from shared storage.",
+          updatedAt: shared.updatedAt,
+        });
         setIsLoading(false);
         return;
+      }
+
+      if (shared?.message) {
+        setSyncState({
+          state: "local",
+          label: "Local only",
+          detail: shared.message,
+        });
+      } else if (shared?.enabled) {
+        setSyncState({
+          state: "empty",
+          label: "Waiting for setup",
+          detail: "No shared tracker snapshot found yet.",
+        });
       }
 
       const localBackup = loadLocalCoreSnapshot();
@@ -464,6 +596,17 @@ export function useTrackerData() {
     }
 
     setSnapshot(next);
+    if (hasCoreTrackerData(next)) {
+      setSyncState((current) =>
+        current.state === "synced"
+          ? current
+          : {
+              state: "syncing",
+              label: "Syncing",
+              detail: "Preparing shared snapshot...",
+            },
+      );
+    }
     setIsLoading(false);
   }, []);
 
@@ -482,21 +625,20 @@ export function useTrackerData() {
   }, [load]);
 
   const coreSnapshot = useMemo(() => pickCoreTrackerSnapshot(snapshot), [snapshot]);
-  const coreSnapshotSignature = useMemo(() => JSON.stringify(coreSnapshot), [coreSnapshot]);
 
   useEffect(() => {
     if (isLoading || !hasCoreTrackerData(coreSnapshot)) {
       return;
     }
 
-    if (lastSyncedCoreSnapshotRef.current === coreSnapshotSignature) {
-      return;
-    }
+    const timer = window.setTimeout(() => {
+      void syncCoreSnapshot(coreSnapshot);
+    }, 0);
 
-    lastSyncedCoreSnapshotRef.current = coreSnapshotSignature;
-    saveLocalCoreSnapshot(coreSnapshot);
-    void saveSharedTrackerSnapshot(coreSnapshot);
-  }, [coreSnapshot, coreSnapshotSignature, isLoading]);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [coreSnapshot, isLoading, syncCoreSnapshot]);
 
   const settings = useMemo(
     () => ({
@@ -629,10 +771,16 @@ export function useTrackerData() {
           sourceNote: "Manual setup price.",
         });
       }
+      await syncCoreSnapshot({
+        settings: nextSettings,
+        saleEvents: [sale],
+        contributions: [],
+        trades: [],
+      });
       await load();
       toast.success("Catch-Up Tracker created");
     },
-    [load],
+    [load, syncCoreSnapshot],
   );
 
   const loadDemo = useCallback(async () => {
@@ -1156,6 +1304,7 @@ export function useTrackerData() {
     isLoading,
     isRefreshing,
     warning,
+    syncState,
     load,
     createTracker,
     loadDemo,

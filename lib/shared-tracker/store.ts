@@ -105,17 +105,6 @@ export async function getSharedTrackerSnapshot(): Promise<SharedTrackerSnapshotR
     }
 
     if (!data) {
-      const local = await readLocalSharedTrackerSnapshot();
-      if (local.enabled) {
-        return {
-          enabled: true,
-          snapshot: local.snapshot,
-          updatedAt: local.updatedAt,
-          source: local.source,
-          message: "Shared tracker snapshot not found remotely; using local snapshot.",
-        };
-      }
-
       return { enabled: true };
     }
 
@@ -127,18 +116,9 @@ export async function getSharedTrackerSnapshot(): Promise<SharedTrackerSnapshotR
       source: "shared",
     };
   } catch (error) {
-    const local = await readLocalSharedTrackerSnapshot();
-    if (local.enabled) {
-      return {
-        enabled: true,
-        snapshot: local.snapshot,
-        updatedAt: local.updatedAt,
-        source: local.source,
-        message: error instanceof Error ? error.message : "Shared tracker read failed.",
-      };
-    }
-
-    throw error;
+    throw new Error(
+      error instanceof Error ? error.message : "Shared tracker read failed.",
+    );
   }
 }
 

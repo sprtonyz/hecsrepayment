@@ -28,7 +28,7 @@ export function AppShell({
   subtitle?: string;
 }) {
   const pathname = usePathname();
-  const { settings, saveSettings } = useTrackerData();
+  const { settings, saveSettings, syncState } = useTrackerData();
 
   async function setDisplayCurrency(currency: Currency) {
     if (settings.displayCurrency !== currency) {
@@ -54,6 +54,12 @@ export function AppShell({
                 <p className="text-xs text-muted-foreground">
                   Had I Held vs Rebuild Portfolio, valued in USD
                 </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Badge variant={syncBadgeVariant(syncState.state)}>{syncState.label}</Badge>
+                  {syncState.detail ? (
+                    <p className="text-xs text-muted-foreground">{syncState.detail}</p>
+                  ) : null}
+                </div>
               </div>
             </Link>
 
@@ -116,4 +122,17 @@ export function AppShell({
       </footer>
     </div>
   );
+}
+
+function syncBadgeVariant(state: string): "default" | "secondary" | "outline" | "success" | "warning" {
+  if (state === "synced") {
+    return "success";
+  }
+  if (state === "error") {
+    return "warning";
+  }
+  if (state === "syncing" || state === "loading") {
+    return "secondary";
+  }
+  return "outline";
 }

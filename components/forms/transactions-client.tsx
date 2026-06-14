@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Calculator, Edit2, Plus, Trash2 } from "lucide-react";
+import { addMonths, format, parseISO } from "date-fns";
+import { Calculator, ChevronLeft, ChevronRight, Edit2, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,11 +32,11 @@ type Row =
 export function TransactionsClient() {
   const searchParams = useSearchParams();
   const prefillAppliedRef = useRef(false);
+  const currentStatementMonthKey = todayIso().slice(0, 7);
   const tracker = useTrackerData();
   const {
     snapshot,
     settings,
-    saleEvent,
     latestAudToUsdRate,
     currentPriceUsd,
     isRefreshing,
@@ -82,7 +83,7 @@ export function TransactionsClient() {
   const [tradeFx, setTradeFx] = useState(String(latestAudToUsdRate.toFixed(4)));
   const [tradeNotes, setTradeNotes] = useState("");
   const [editingTradeId, setEditingTradeId] = useState<string | undefined>();
-  const autoRefreshKeyRef = useRef<string | undefined>(undefined);
+  const [statementMonthKey, setStatementMonthKey] = useState(currentStatementMonthKey);
 
   const rows = useMemo<Row[]>(
     () =>
@@ -97,21 +98,28 @@ export function TransactionsClient() {
     [snapshot.contributions, snapshot.trades],
   );
 
-  useEffect(() => {
-    if (!saleEvent) {
-      return;
-    }
-    const autoRefreshKey = [
-      saleEvent.id,
-      settings.baseTicker,
-      settings.marketDataProvider,
-    ].join(":");
-    if (autoRefreshKeyRef.current === autoRefreshKey) {
-      return;
-    }
-    autoRefreshKeyRef.current = autoRefreshKey;
-    void refreshMarketData(false, { silent: true });
-  }, [refreshMarketData, saleEvent, settings.baseTicker, settings.marketDataProvider]);
+  const selectedStatementRows = useMemo(
+    () => rows.filter((row) => row.date.slice(0, 7) === statementMonthKey),
+    [rows, statementMonthKey],
+  );
+
+  const selectedStatementContributionTotalUsd = useMemo(
+    () =>
+      roundMoney(
+        selectedStatementRows.reduce((total, row) => {
+          if (row.kind !== "contribution") {
+            return total;
+          }
+          return total + row.item.amountUsd;
+        }, 0),
+      ),
+    [selectedStatementRows],
+  );
+
+  const selectedStatementLabel = useMemo(
+    () => format(parseISO(`${statementMonthKey}-01`), "MMMM yyyy"),
+    [statementMonthKey],
+  );
 
   useEffect(() => {
     if (prefillAppliedRef.current || searchParams.get("prefill") !== "month") {
@@ -262,6 +270,20 @@ export function TransactionsClient() {
   );
   const matchingUsd = roundMoney(Number(matchingContributionAud || 0) * Number(tradeFx || 0));
   const tradeGrossUsd = roundMoney(Number(shares || 0) * Number(effectiveTradePriceUsd || 0));
+
+  function shiftStatementMonth(direction: -1 | 1) {
+    setStatementMonthKey((monthKey) => {
+      const nextMonthKey = format(addMonths(parseISO(`${monthKey}-01`), direction), "yyyy-MM");
+      if (direction > 0 && nextMonthKey > currentStatementMonthKey) {
+        return currentStatementMonthKey;
+      }
+      return nextMonthKey;
+    });
+  }
+
+  function resetStatementMonth() {
+    setStatementMonthKey(currentStatementMonthKey);
+  }
 
   return (
     <AppShell
@@ -569,11 +591,82 @@ export function TransactionsClient() {
           </Card>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Transaction Ledger</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <div className="space-y-6">
+          <Card>
+            <CardHeader className="space-y-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-1">
+                  <CardTitle>Statement cycle</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Browse past statement months without changing any transaction entries.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    aria-label="Previous statement month"
+                    size="icon"
+                    variant="outline"
+                    onClick={() => shiftStatementMonth(-1)}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <div className="min-w-[180px] rounded-md border bg-background px-3 py-2 text-center">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                      Viewing
+                    </p>
+                    <p className="text-sm font-medium">{selectedStatementLabel}</p>
+                  </div>
+                  <Button
+                    aria-label="Next statement month"
+                    size="icon"
+                    variant="outline"
+                    disabled={statementMonthKey >= currentStatementMonthKey}
+                    onClick={() => shiftStatementMonth(1)}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    className="shrink-0"
+                    size="sm"
+                    variant="ghost"
+                    onClick={resetStatementMonth}
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Reset
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                <div className="rounded-lg border bg-muted/30 p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Statement total
+                  </p>
+                  <p className="mt-2 text-3xl font-semibold">
+                    {formatCurrency(selectedStatementContributionTotalUsd, "USD")}
+                  </p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Contributions logged in {selectedStatementLabel}. This is view-only and does
+                    not change assignments.
+                  </p>
+                </div>
+                <div className="grid gap-2 rounded-lg border bg-background p-4 text-sm text-muted-foreground">
+                  <p>
+                    {selectedStatementRows.length} ledger item
+                    {selectedStatementRows.length === 1 ? "" : "s"} in this cycle.
+                  </p>
+                  <p>Use the arrows to inspect the previous statement total, then reset to current.</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Transaction Ledger</CardTitle>
+            </CardHeader>
+            <CardContent>
             {rows.length === 0 ? (
               <div className="rounded-md border bg-muted p-6 text-sm text-muted-foreground">
                 No contributions or trades yet.
@@ -647,8 +740,9 @@ export function TransactionsClient() {
                 </TableBody>
               </Table>
             )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </AppShell>
   );

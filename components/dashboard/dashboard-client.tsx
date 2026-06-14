@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { formatCurrency, formatPercent, formatShares, roundMoney } from "@/lib/domain/money";
 import {
   ArrowRight,
   BarChart3,
@@ -47,7 +48,6 @@ import {
   type DepositGuideNewsInput,
 } from "@/lib/domain/depositGuide";
 import { formatDisplayDate, todayIso } from "@/lib/domain/dates";
-import { formatCurrency, formatPercent, formatShares, roundMoney } from "@/lib/domain/money";
 import { buildAiNewsDigest } from "@/lib/ai/articleAnalysis";
 import { getCompanyReviewProfile } from "@/lib/news/companyReviewProfiles";
 import { isRelevantNewsArticle } from "@/lib/news/relevance";
@@ -197,7 +197,6 @@ export function DashboardClient() {
     () => loadSelectedComparisonSymbol(),
   );
   const reviewerDraftRef = useRef<ReviewerDraft>(createReviewerDraft(settings.baseTicker));
-  const autoRefreshKeyRef = useRef<string | undefined>(undefined);
   const syncReviewerDraftRef = useCallback((draft: ReviewerDraft) => {
     reviewerDraftRef.current = draft;
   }, []);
@@ -210,22 +209,6 @@ export function DashboardClient() {
   useEffect(() => {
     reviewerDraftRef.current = loadReviewerDraft(settings.baseTicker);
   }, [settings.baseTicker]);
-
-  useEffect(() => {
-    if (!saleEvent) {
-      return;
-    }
-    const autoRefreshKey = [
-      saleEvent.id,
-      settings.baseTicker,
-      settings.marketDataProvider,
-    ].join(":");
-    if (autoRefreshKeyRef.current === autoRefreshKey) {
-      return;
-    }
-    autoRefreshKeyRef.current = autoRefreshKey;
-    refreshMarketData(false, { silent: true });
-  }, [refreshMarketData, saleEvent, settings.baseTicker, settings.marketDataProvider]);
 
   const metrics = useMemo(
     () =>
@@ -453,16 +436,8 @@ export function DashboardClient() {
   const selectedComparisonReview =
     loadedComparisonReviews.find((item) => item.symbol === selectedComparisonSymbol) ??
     bestComparisonReview;
-  useEffect(() => {
-    if (!loadedComparisonReviews.length) {
-      return;
-    }
-    const preferredSymbol =
-      selectedComparisonReview?.symbol ?? bestComparisonReview?.symbol ?? loadedComparisonReviews[0]?.symbol;
-    if (preferredSymbol && preferredSymbol !== selectedComparisonSymbol) {
-      setSelectedComparisonSymbol(preferredSymbol);
-    }
-  }, [bestComparisonReview?.symbol, loadedComparisonReviews, selectedComparisonReview?.symbol, selectedComparisonSymbol]);
+  const effectiveSelectedComparisonSymbol =
+    selectedComparisonReview?.symbol ?? bestComparisonReview?.symbol ?? loadedComparisonReviews[0]?.symbol;
   useEffect(() => {
     persistSelectedComparisonSymbol(selectedComparisonSymbol);
   }, [selectedComparisonSymbol]);
@@ -561,7 +536,7 @@ export function DashboardClient() {
   });
   const reviewSummarySource = bestComparisonReview?.codexReview
     ? {
-        symbol: selectedComparisonReview?.symbol ?? bestComparisonReview.symbol,
+        symbol: effectiveSelectedComparisonSymbol ?? bestComparisonReview.symbol,
         digest: guideNewsDigest,
         codexReview: selectedComparisonReview?.codexReview ?? bestComparisonReview.codexReview,
         rankScore: selectedComparisonReview?.rankScore ?? bestComparisonReview.rankScore,
@@ -1306,7 +1281,7 @@ export function DashboardClient() {
                     Use this ticket
                   </Label>
                   <Select
-                    value={selectedComparisonReview?.symbol ?? bestComparisonReview.symbol}
+                    value={effectiveSelectedComparisonSymbol ?? bestComparisonReview.symbol}
                     onValueChange={(value) => setSelectedComparisonSymbol(value)}
                   >
                     <SelectTrigger className="mt-1">
