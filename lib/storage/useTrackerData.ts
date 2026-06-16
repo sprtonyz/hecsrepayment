@@ -506,6 +506,7 @@ export function useTrackerData() {
         return undefined;
       }
 
+      const previousSignature = lastSyncedCoreSnapshotRef.current;
       lastSyncedCoreSnapshotRef.current = signature;
       setSyncState({
         state: "syncing",
@@ -536,6 +537,8 @@ export function useTrackerData() {
           label: "Local only",
           detail: sharedSync.message || "Shared sync is not available on this deployment.",
         });
+      } else if (!sharedSync?.synced) {
+        lastSyncedCoreSnapshotRef.current = previousSignature;
       }
 
       return sharedSync;
@@ -554,23 +557,28 @@ export function useTrackerData() {
             detail: "Loading saved tracker data...",
           },
     );
-    const next = await indexedDbAdapter.getSnapshot();
-    if (!hasCoreTrackerData(next)) {
-      const shared = await fetchSharedTrackerSnapshot();
-      if (shared?.enabled && shared.snapshot && hasCoreTrackerData(shared.snapshot)) {
-        await indexedDbAdapter.importSnapshot(shared.snapshot as TrackerSnapshot);
-        const hydrated = await indexedDbAdapter.getSnapshot();
-        setSnapshot(hydrated);
-        setSyncState({
-          state: "synced",
-          label: "Synced",
-          detail: "Loaded from shared storage.",
-          updatedAt: shared.updatedAt,
-        });
-        setIsLoading(false);
-        return;
-      }
+    const [shared, next] = await Promise.all([
+      fetchSharedTrackerSnapshot(),
+      indexedDbAdapter.getSnapshot(),
+    ]);
 
+    if (shared?.enabled && shared.snapshot && hasCoreTrackerData(shared.snapshot)) {
+      await indexedDbAdapter.importSnapshot(shared.snapshot as TrackerSnapshot);
+      const hydrated = await indexedDbAdapter.getSnapshot();
+      setSnapshot(hydrated);
+      lastSyncedCoreSnapshotRef.current = JSON.stringify(pickCoreTrackerSnapshot(hydrated));
+      setSyncState({
+        state: "synced",
+        label: "Synced",
+        detail: "Loaded from shared storage.",
+        updatedAt: shared.updatedAt,
+      });
+      setIsLoading(false);
+      return;
+    }
+
+    const localBackup = hasCoreTrackerData(next) ? next : loadLocalCoreSnapshot();
+    if (localBackup && hasCoreTrackerData(localBackup)) {
       if (shared?.message) {
         setSyncState({
           state: "local",
@@ -579,26 +587,43 @@ export function useTrackerData() {
         });
       } else if (shared?.enabled) {
         setSyncState({
-          state: "empty",
-          label: "Waiting for setup",
-          detail: "No shared tracker snapshot found yet.",
+          state: "syncing",
+          label: "Syncing",
+          detail: "Preparing shared snapshot...",
+        });
+      } else {
+        setSyncState({
+          state: "local",
+          label: "Local only",
+          detail: "Shared sync is not available on this deployment.",
         });
       }
 
-      const localBackup = loadLocalCoreSnapshot();
-      if (localBackup && hasCoreTrackerData(localBackup)) {
+      if (!hasCoreTrackerData(next)) {
         await indexedDbAdapter.importSnapshot(localBackup as TrackerSnapshot);
         const hydrated = await indexedDbAdapter.getSnapshot();
         setSnapshot(hydrated);
         setIsLoading(false);
         return;
       }
+    } else if (shared?.message) {
+      setSyncState({
+        state: "local",
+        label: "Local only",
+        detail: shared.message,
+      });
+    } else if (shared?.enabled) {
+      setSyncState({
+        state: "empty",
+        label: "Waiting for setup",
+        detail: "No shared tracker snapshot found yet.",
+      });
     }
 
     setSnapshot(next);
     if (hasCoreTrackerData(next)) {
       setSyncState((current) =>
-        current.state === "synced"
+        current.state === "synced" || current.state === "syncing" || current.state === "local"
           ? current
           : {
               state: "syncing",
