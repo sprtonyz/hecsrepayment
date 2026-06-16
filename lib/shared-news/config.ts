@@ -4,9 +4,25 @@ type SharedNewsConfig = {
   reviewToken?: string;
 };
 
+export function normalizeSupabaseUrl(value?: string) {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(value);
+    url.pathname = "/";
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return value.trim().replace(/\/rest\/v1\/?$/i, "").replace(/\/$/, "");
+  }
+}
+
 export function getSharedNewsConfig(): SharedNewsConfig {
   return {
-    url: process.env.SUPABASE_URL?.trim(),
+    url: normalizeSupabaseUrl(process.env.SUPABASE_URL),
     secretKey:
       process.env.SUPABASE_SECRET_KEY?.trim() ||
       process.env.SUPABASE_SERVICE_ROLE_KEY?.trim(),
