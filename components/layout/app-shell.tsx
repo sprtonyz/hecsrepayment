@@ -83,7 +83,7 @@ export function AppShell({
       >
         <aside
           className={cn(
-            "rounded-[2rem] border border-border/70 bg-card/90 p-4 shadow-[0_18px_50px_rgba(18,32,51,0.08)] backdrop-blur-xl lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:self-start",
+            "rounded-[2rem] border border-border/70 bg-card/80 p-4 shadow-[0_26px_90px_rgba(3,7,18,0.35)] backdrop-blur-xl lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:self-start",
             isSidebarCollapsed && "lg:p-3",
           )}
         >
@@ -195,7 +195,7 @@ export function AppShell({
             <div>{children}</div>
           </main>
 
-          <footer className="rounded-[1.5rem] border border-border/70 bg-card/80 px-5 py-4 text-xs text-muted-foreground backdrop-blur-xl">
+          <footer className="rounded-[1.5rem] border border-border/70 bg-card/70 px-5 py-4 text-xs text-muted-foreground backdrop-blur-xl">
             For personal tracking only. This is not financial advice and may not reflect tax,
             brokerage, or market-data limitations.
           </footer>

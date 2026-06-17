@@ -1873,7 +1873,7 @@ function HeroStat({
   tip?: string;
 }) {
   return (
-    <div className="rounded-lg border bg-background/80 p-4">
+    <div className="rounded-2xl border border-border/70 bg-card/70 p-4 shadow-[0_10px_30px_rgba(3,7,18,0.12)] backdrop-blur-sm">
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm text-muted-foreground">{label}</p>
         {tip ? (
@@ -1882,7 +1882,7 @@ function HeroStat({
           </InfoTip>
         ) : null}
       </div>
-      <p className="mt-1 text-xl font-semibold">{value}</p>
+      <p className="mt-1 text-2xl font-semibold tracking-tight">{value}</p>
       <p className="mt-1 text-xs text-muted-foreground">{note}</p>
     </div>
   );
@@ -2411,11 +2411,13 @@ function AttentionItem({
   tone: "ok" | "action";
 }) {
   return (
-    <div className="flex gap-3 rounded-lg border bg-background p-3">
+    <div className="flex gap-3 rounded-2xl border border-border/70 bg-card/70 p-3 shadow-[0_10px_30px_rgba(3,7,18,0.18)] backdrop-blur-sm">
       <div
         className={cn(
-          "mt-0.5 rounded-md p-1.5",
-          tone === "ok" ? "bg-accent text-accent-foreground" : "bg-[#fff3cf] text-[#765100]",
+          "mt-0.5 rounded-xl p-2",
+          tone === "ok"
+            ? "bg-accent text-accent-foreground"
+            : "bg-[#fff3cf] text-[#765100] dark:bg-[#4b390d] dark:text-[#ffe49c]",
         )}
       >
         {tone === "ok" ? <CheckCircle2 className="h-4 w-4" /> : icon}
@@ -2443,18 +2445,24 @@ function SummaryTile({
 }) {
   return (
     <Card>
-      <CardContent className="p-5">
+      <CardContent className="relative p-5">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-primary/70 via-cyan-400/70 to-transparent" />
         <div className="flex items-start gap-3">
-          <div className="rounded-md bg-muted p-2 text-primary">{icon}</div>
-          <div className="min-w-0">
+          <div className="rounded-2xl bg-primary/12 p-2.5 text-primary ring-1 ring-primary/15">
+            {icon}
+          </div>
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-muted-foreground">{title}</p>
-            <p className="mt-1 text-2xl font-semibold tracking-normal">{value}</p>
-            <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+            <p className="mt-2 text-[2rem] font-semibold tracking-tight leading-none">{value}</p>
+            <p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">{description}</p>
           </div>
         </div>
-        <div className="mt-4 space-y-2 border-t pt-4">
+        <div className="mt-5 grid gap-2 border-t border-border/60 pt-4">
           {rows.map(([label, rowValue]) => (
-            <div key={label} className="flex items-start justify-between gap-3 text-sm">
+            <div
+              key={label}
+              className="flex items-start justify-between gap-3 rounded-xl bg-background/45 px-3 py-2 text-sm"
+            >
               <span className="text-muted-foreground">{label}</span>
               <span className="text-right font-medium">{rowValue}</span>
             </div>
@@ -2477,7 +2485,7 @@ function PlainMetric({
   tip?: string;
 }) {
   return (
-    <div className="rounded-lg border bg-background p-4">
+    <div className="rounded-2xl border border-border/70 bg-card/70 p-4 shadow-[0_10px_30px_rgba(3,7,18,0.15)] backdrop-blur-sm">
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm text-muted-foreground">{label}</p>
         {tip ? (
@@ -2486,7 +2494,7 @@ function PlainMetric({
           </InfoTip>
         ) : null}
       </div>
-      <p className="mt-1 text-xl font-semibold">{value}</p>
+      <p className="mt-1 text-xl font-semibold tracking-tight">{value}</p>
       {note ? <p className="mt-1 text-xs text-muted-foreground">{note}</p> : null}
     </div>
   );
@@ -2506,7 +2514,7 @@ function MarketCacheDebugger({
   const hasEnoughHistory = summary.usablePriceCount >= 7;
 
   return (
-    <div className="rounded-lg border bg-background p-4">
+    <div className="rounded-2xl border border-border/70 bg-card/70 p-4 shadow-[0_10px_30px_rgba(3,7,18,0.15)] backdrop-blur-sm">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <p className="text-sm font-medium">Market cache debugger</p>
@@ -2583,7 +2591,7 @@ function SchoolMonthSummary({
   formatAud: (value: number) => string;
 }) {
   return (
-    <div className="rounded-lg border bg-background p-4">
+    <div className="rounded-2xl border border-border/70 bg-card/70 p-4 shadow-[0_10px_30px_rgba(3,7,18,0.15)] backdrop-blur-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium">Debt decision</p>
@@ -2630,8 +2638,8 @@ function SchoolVerdictCard({
   return (
     <div
       className={cn(
-        "rounded-lg border p-4",
-        isCashOut && "border-accent bg-accent/40",
+        "rounded-[1.5rem] border p-4 shadow-[0_14px_40px_rgba(3,7,18,0.2)]",
+        isCashOut && "border-accent bg-accent/35",
         isKeepAapl && "border-[#f4cf76] bg-[#fff8e7] dark:bg-[#33280f]",
       )}
     >
@@ -2728,7 +2736,7 @@ function DetailsPanel({
 
   return (
     <details
-      className="group rounded-lg border bg-card text-card-foreground shadow-sm"
+      className="group rounded-[1.5rem] border border-border/70 bg-card/75 text-card-foreground shadow-[0_14px_40px_rgba(3,7,18,0.18)] backdrop-blur-xl"
       onToggle={(event) => {
         if (renderFrameRef.current !== null) {
           window.cancelAnimationFrame(renderFrameRef.current);
@@ -2753,7 +2761,7 @@ function DetailsPanel({
         </div>
         <ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
-      {shouldRenderContent ? <div className="border-t p-5">{children}</div> : null}
+      {shouldRenderContent ? <div className="border-t border-border/60 p-5">{children}</div> : null}
     </details>
   );
 }
@@ -2770,7 +2778,7 @@ function DetailRow({
   strong?: boolean;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3 rounded-lg border bg-background px-3 py-2">
+    <div className="flex items-start justify-between gap-3 rounded-xl border border-border/70 bg-background/50 px-3 py-2">
       <div className="min-w-0">
         <span className="text-sm text-muted-foreground">{label}</span>
         {note ? <p className="mt-1 text-xs text-muted-foreground">{note}</p> : null}
@@ -2784,7 +2792,7 @@ function DetailRow({
 
 function ChartBlock({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="rounded-lg border bg-background p-4">
+    <div className="rounded-2xl border border-border/70 bg-card/65 p-4 shadow-[0_10px_30px_rgba(3,7,18,0.14)] backdrop-blur-sm">
       <h3 className="mb-3 text-sm font-medium text-muted-foreground">{title}</h3>
       {children}
     </div>
@@ -2793,9 +2801,9 @@ function ChartBlock({ title, children }: { title: string; children: ReactNode })
 
 function Factor({ icon, text }: { icon: ReactNode; text: string }) {
   return (
-    <div className="flex gap-3 rounded-lg border bg-background p-3">
+    <div className="flex gap-3 rounded-2xl border border-border/70 bg-card/65 p-3 shadow-[0_10px_30px_rgba(3,7,18,0.12)] backdrop-blur-sm">
       <div className="mt-0.5 text-primary">{icon}</div>
-      <p className="text-sm text-muted-foreground">{text}</p>
+      <p className="text-sm leading-6 text-muted-foreground">{text}</p>
     </div>
   );
 }
