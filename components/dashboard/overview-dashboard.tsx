@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -19,11 +19,40 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { calculateCatchUpMetrics } from "@/lib/domain/calculations";
 import { calculateDepositGuide } from "@/lib/domain/depositGuide";
 import { todayIso } from "@/lib/domain/dates";
+import { scoreCodexReviewForComparison } from "@/lib/news/codexReviewRanking";
 import { useTrackerData } from "@/lib/storage/useTrackerData";
 import { cn } from "@/lib/utils";
+
+const COMPARISON_SYMBOLS = ["AAPL", "NVDA", "AMZN", "TSLA", "SPACEX"] as const;
+
+type ComparisonReviewCard = {
+  symbol: string;
+  reviewMonth: string;
+  status: "loaded" | "prepared" | "missing" | "error";
+  generatedAt?: string;
+  rankScore: number;
+  codexReview?: {
+    appliedNewsDigest?: {
+      signal?: "positive" | "neutral" | "negative";
+      confidence?: "low" | "medium" | "high";
+      positiveArticleCount?: number;
+      negativeArticleCount?: number;
+      neutralArticleCount?: number;
+      materialArticleCount?: number;
+    };
+    suggestedGuideImpact?: {
+      rationale?: string;
+      depositSuggestion?: string;
+      newsSignal?: string;
+    };
+    rationale?: string;
+  };
+  error?: string;
+};
 
 export function DashboardOverview() {
   const tracker = useTrackerData();
@@ -126,6 +155,97 @@ export function DashboardOverview() {
   const catchUpValue = formatMoney(Math.abs(metrics.catchUpGapAud));
   const statusLabel = heroAhead ? "On track" : "Needs attention";
   const recentBars = useMemo(() => buildRecentContributionBars(snapshot.contributions, asOfDate), [asOfDate, snapshot.contributions]);
+  const codexReviewMonth = asOfDate.slice(0, 7);
+  const [comparisonLoading, setComparisonLoading] = useState(true);
+  const [comparisonError, setComparisonError] = useState<string | undefined>();
+  const [comparisonReviews, setComparisonReviews] = useState<ComparisonReviewCard[]>([]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    Promise.all(
+      COMPARISON_SYMBOLS.map(async (symbol) => {
+        try {
+          const params = new URLSearchParams({
+            symbol,
+            reviewMonth: codexReviewMonth,
+          });
+          const response = await fetch(`/api/codex-review-bundle?${params.toString()}`, {
+            cache: "no-store",
+          });
+          if (!response.ok) {
+            return {
+              symbol,
+              reviewMonth: codexReviewMonth,
+              status: "missing" as const,
+              rankScore: -999,
+            };
+          }
+
+          const payload = (await response.json()) as {
+            filename?: string;
+            generatedAt?: string;
+            codexReview?: ComparisonReviewCard["codexReview"];
+          };
+          const review = payload.codexReview ?? undefined;
+          return {
+            symbol,
+            reviewMonth: codexReviewMonth,
+            status: review ? "loaded" : "prepared",
+            generatedAt: payload.generatedAt,
+            codexReview: review,
+            rankScore: review
+              ? scoreCodexReviewForComparison(
+                  review as Parameters<typeof scoreCodexReviewForComparison>[0],
+                )
+              : 0,
+          } satisfies ComparisonReviewCard;
+        } catch (error) {
+          return {
+            symbol,
+            reviewMonth: codexReviewMonth,
+            status: "error" as const,
+            rankScore: -999,
+            error: error instanceof Error ? error.message : "Could not load review.",
+          } satisfies ComparisonReviewCard;
+        }
+      }),
+    )
+      .then((results) => {
+        if (!isActive) {
+          return;
+        }
+        setComparisonError(undefined);
+        setComparisonReviews(results.sort((left, right) => right.rankScore - left.rankScore));
+      })
+      .catch((error) => {
+        if (!isActive) {
+          return;
+        }
+        setComparisonError(error instanceof Error ? error.message : "Could not load comparison reviews.");
+      })
+      .finally(() => {
+        if (isActive) {
+          setComparisonLoading(false);
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [codexReviewMonth]);
+
+  const loadedComparisonReviews = comparisonReviews.filter((item) => item.status === "loaded");
+  const bestComparisonReview = loadedComparisonReviews[0];
+  const fetchedComparisonCount = comparisonReviews.filter((item) => item.status !== "missing").length;
+  const reviewedComparisonCount = loadedComparisonReviews.length;
+  const comparisonSignalLabel = bestComparisonReview?.codexReview?.appliedNewsDigest?.signal
+    ? bestComparisonReview.codexReview.appliedNewsDigest.signal
+    : "mixed";
+  const comparisonLeadingRationale =
+    bestComparisonReview?.codexReview?.suggestedGuideImpact?.rationale ??
+    bestComparisonReview?.codexReview?.rationale ??
+    "Prepare the full comparison bundles to see which ticket is strongest.";
 
   return (
     <AppShell title="Dashboard" subtitle="See your status at a glance. Less jargon, more meaning.">
@@ -328,6 +448,258 @@ export function DashboardOverview() {
           </Card>
         </section>
 
+        <section className="grid gap-4">
+          <Card className="overflow-hidden bg-white">
+            <div className="border-b border-slate-200 bg-[#0f1830] px-5 py-5 text-white sm:px-6">
+              <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold uppercase tracking-[0.28em] text-slate-400">
+                    Deep context
+                  </p>
+                  <h2 className="text-2xl font-semibold tracking-tight sm:text-[2rem]">
+                    The rest of the dashboard, tucked into one calm place.
+                  </h2>
+                  <p className="max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">
+                    Cross-stock comparison, portfolio reasoning, and the original detail layers are
+                    still here, just organized so the dashboard starts with the answer instead of the
+                    paperwork.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge className="border-white/10 bg-white/10 text-white" variant="outline">
+                    Review month {codexReviewMonth}
+                  </Badge>
+                  <Badge className="border-white/10 bg-white/10 text-white" variant="outline">
+                    {reviewedComparisonCount}/{COMPARISON_SYMBOLS.length} published
+                  </Badge>
+                </div>
+              </div>
+            </div>
+            <CardContent className="p-5 sm:p-6">
+              <Tabs defaultValue="compare" className="w-full">
+                <TabsList className="grid h-auto w-full grid-cols-3 rounded-[1.4rem] bg-slate-100 p-1">
+                  <TabsTrigger value="compare">Compare stocks</TabsTrigger>
+                  <TabsTrigger value="plan">Plan view</TabsTrigger>
+                  <TabsTrigger value="details">Raw details</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="compare" className="mt-5">
+                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+                    <div className="rounded-[1.6rem] border border-slate-200 bg-slate-50 p-4 sm:p-5">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-500">Strongest ticket</p>
+                          <h3 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
+                            {bestComparisonReview?.symbol ?? "Loading"}
+                          </h3>
+                          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-600">
+                            {comparisonLoading
+                              ? "Loading the current comparison bundles..."
+                              : comparisonLeadingRationale}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Badge
+                            variant={
+                              comparisonSignalLabel === "positive"
+                                ? "success"
+                                : comparisonSignalLabel === "negative"
+                                  ? "warning"
+                                  : "secondary"
+                            }
+                          >
+                            {comparisonSignalLabel}
+                          </Badge>
+                          <Badge variant="outline">
+                            Score {bestComparisonReview ? `${bestComparisonReview.rankScore.toFixed(2)}/5` : "pending"}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      <div className="mt-5 grid gap-3 md:grid-cols-3">
+                        <MiniStatusChip
+                          label="Fetched"
+                          value={`${fetchedComparisonCount}/${COMPARISON_SYMBOLS.length}`}
+                          note="Saved in the current review month"
+                        />
+                        <MiniStatusChip
+                          label="Published"
+                          value={`${reviewedComparisonCount}/${COMPARISON_SYMBOLS.length}`}
+                          note="Ready to influence the guide"
+                        />
+                        <MiniStatusChip
+                          label="Lead"
+                          value={bestComparisonReview?.symbol ?? "Pending"}
+                          note="Top-ranked comparison ticket"
+                        />
+                      </div>
+
+                      {comparisonError ? (
+                        <div className="mt-4 rounded-[1.2rem] border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          {comparisonError}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="grid gap-3">
+                      {comparisonReviews.map((item, index) => {
+                        const digest = item.codexReview?.appliedNewsDigest;
+                        const score = item.rankScore;
+                        const normalizedScore =
+                          item.status === "loaded"
+                            ? Math.max(6, Math.min(100, ((score + 5) / 10) * 100))
+                            : item.status === "prepared"
+                              ? 24
+                              : 10;
+                        const scoreLabel =
+                          item.status === "loaded"
+                            ? score.toFixed(2)
+                            : item.status === "prepared"
+                              ? "Ready"
+                              : item.status === "missing"
+                                ? "Missing"
+                                : "Error";
+                        return (
+                          <div
+                            key={item.symbol}
+                            className="rounded-[1.4rem] border border-slate-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.04)]"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">
+                                  Rank {index + 1}
+                                </p>
+                                <p className="mt-1 text-lg font-semibold text-slate-950">{item.symbol}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-lg font-semibold text-slate-950">{scoreLabel}</p>
+                                <p className="text-xs text-slate-500">
+                                  {item.status === "loaded" ? "fit / 5" : "review status"}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+                              <div
+                                className={cn(
+                                  "h-full rounded-full",
+                                  digest?.signal === "positive"
+                                    ? "bg-emerald-500"
+                                    : digest?.signal === "negative"
+                                      ? "bg-amber-500"
+                                      : "bg-slate-400",
+                                )}
+                                style={{ width: `${normalizedScore}%` }}
+                              />
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <Badge
+                                variant={
+                                  digest?.signal === "positive"
+                                    ? "success"
+                                    : digest?.signal === "negative"
+                                      ? "warning"
+                                      : "secondary"
+                                }
+                              >
+                                {digest?.signal ?? "pending"}
+                              </Badge>
+                              <Badge variant="outline">
+                                {digest?.confidence ? `${digest.confidence} confidence` : item.status}
+                              </Badge>
+                            </div>
+                            <p className="mt-3 text-sm leading-6 text-slate-600">
+                              {item.codexReview?.suggestedGuideImpact?.rationale ??
+                                item.codexReview?.rationale ??
+                                "No published rationale yet."}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="plan" className="mt-5">
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+                    <div className="rounded-[1.6rem] border border-slate-200 bg-slate-50 p-5">
+                      <p className="text-sm font-semibold text-slate-500">Plan view</p>
+                      <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+                        A plain-language version of the original planning block.
+                      </h3>
+                      <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
+                        The dashboard now leads with the answer, while the planning layer stays
+                        reachable for people who want the why behind it.
+                      </p>
+                      <div className="mt-5 grid gap-3 md:grid-cols-3">
+                        <MiniMetricCard
+                          color="emerald"
+                          icon={<Wallet className="h-4 w-4" />}
+                          label="Logged this month"
+                          value={formatMoney(currentMonthContributionAud)}
+                          note="What has already landed."
+                        />
+                        <MiniMetricCard
+                          color="blue"
+                          icon={<Target className="h-4 w-4" />}
+                          label="Monthly target"
+                          value={formatMoney(settings.planMonthlyContributionAud)}
+                          note="The current guidepost."
+                        />
+                        <MiniMetricCard
+                          color="amber"
+                          icon={<CircleDollarSign className="h-4 w-4" />}
+                          label="Still to close"
+                          value={formatMoney(gapRemainingAud)}
+                          note={heroAhead ? "Keep pace to stay ahead." : "A small catch-up remains."}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="rounded-[1.6rem] border border-slate-200 bg-[#0f1830] p-5 text-white">
+                      <p className="text-sm font-semibold text-slate-400">Short answer</p>
+                      <p className="mt-3 text-2xl font-semibold tracking-tight">
+                        {heroAhead ? "You are ahead this month." : "You are behind this month."}
+                      </p>
+                      <p className="mt-3 text-sm leading-6 text-slate-300">
+                        {heroSummary} Open projections if you want the more technical debt and
+                        rebuild breakdown.
+                      </p>
+                      <div className="mt-5 grid gap-3">
+                        <div className="rounded-[1.2rem] border border-white/10 bg-white/5 p-4">
+                          <p className="text-xs uppercase tracking-[0.24em] text-slate-400">
+                            Monthly guide
+                          </p>
+                          <p className="mt-2 text-xl font-semibold text-white">
+                            {formatMoney(depositGuide.recommendedDepositAud)}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-400">
+                            Range {formatMoney(depositGuide.minThisMonthAud)} to{" "}
+                            {formatMoney(depositGuide.maxThisMonthAud)}.
+                          </p>
+                        </div>
+                        <Button asChild className="bg-emerald-400 text-slate-950 hover:bg-emerald-300">
+                          <Link href="/projections">Open full projections</Link>
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="details" className="mt-5">
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    <DetailTile label="Value ahead / short" value={`${formatMoney(Math.abs(metrics.paceDifferenceAud))} ${heroValueLabel}`} />
+                    <DetailTile label="Current logged" value={formatMoney(currentMonthContributionAud)} />
+                    <DetailTile label="Target" value={formatMoney(settings.planMonthlyContributionAud)} />
+                    <DetailTile label="Monthly progress" value={`${Math.round(progressPercent)}%`} />
+                    <DetailTile label="Comparison month" value={codexReviewMonth} />
+                    <DetailTile label="Signal leader" value={bestComparisonReview?.symbol ?? "Pending"} />
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </Card>
+        </section>
+
         <section className="grid gap-4 md:grid-cols-3">
           <InfoCard
             title="Today"
@@ -452,6 +824,33 @@ function InfoCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function MiniStatusChip({
+  label,
+  value,
+  note,
+}: {
+  label: string;
+  value: string;
+  note: string;
+}) {
+  return (
+    <div className="rounded-[1.2rem] border border-slate-200 bg-white p-3">
+      <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">{label}</p>
+      <p className="mt-2 text-lg font-semibold text-slate-950">{value}</p>
+      <p className="mt-1 text-sm leading-6 text-slate-500">{note}</p>
+    </div>
+  );
+}
+
+function DetailTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[1.4rem] border border-slate-200 bg-white p-4 shadow-[0_10px_24px_rgba(15,23,42,0.04)]">
+      <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">{label}</p>
+      <p className="mt-2 text-lg font-semibold text-slate-950">{value}</p>
+    </div>
   );
 }
 
