@@ -117,14 +117,14 @@ export function DashboardOverview() {
   const heroAhead = metrics.paceDifferenceAud >= 0;
   const heroValue = formatMoney(Math.abs(metrics.paceDifferenceAud));
   const heroLabel = heroAhead ? "You are ahead this month" : "You are behind this month";
+  const heroValueLabel = heroAhead ? "ahead" : "short";
   const heroSummary = heroAhead
     ? `You've logged ${formatMoney(currentMonthContributionAud)} so far, which is ${heroValue} above the expected pace.`
     : `You've logged ${formatMoney(currentMonthContributionAud)} so far, which is ${heroValue} short of the expected pace.`;
   const gapRemainingAud = Math.max(0, depositGuide.remainingThisMonthAud);
   const catchUpLabel = metrics.catchUpGapAud >= 0 ? "Gap remaining" : "Ahead of plan";
   const catchUpValue = formatMoney(Math.abs(metrics.catchUpGapAud));
-  const statusLabel =
-    progressPercent >= 95 ? "On track" : depositGuide.direction === "increase" ? "Needs attention" : "On track";
+  const statusLabel = heroAhead ? "On track" : "Needs attention";
   const recentBars = useMemo(() => buildRecentContributionBars(snapshot.contributions, asOfDate), [asOfDate, snapshot.contributions]);
 
   return (
@@ -137,7 +137,7 @@ export function DashboardOverview() {
                 <div className="space-y-4">
                   <p className="text-sm font-semibold text-emerald-600">{heroLabel}</p>
                   <p className="text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">
-                    {heroValue} ahead
+                    {heroValue} {heroValueLabel}
                   </p>
                   <p className="max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
                     {heroSummary}
@@ -493,6 +493,7 @@ function buildRecentContributionBars(
   }
 
   const max = Math.max(...months.map((month) => month.value), 1);
+  const hasAnyValue = months.some((month) => month.value > 0);
   const palette: Array<"blue" | "emerald" | "amber"> = [
     "blue",
     "blue",
@@ -509,7 +510,9 @@ function buildRecentContributionBars(
   return months.map((month, index) => ({
     index,
     label: month.label,
-    height: Math.max(18, (month.value / max) * 100),
+    height: hasAnyValue
+      ? Math.max(18, (month.value / max) * 100)
+      : [22, 30, 28, 44, 38, 56, 50, 68, 60, 74][index] ?? 24,
     tint: palette[index] ?? "blue",
   }));
 }
