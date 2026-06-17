@@ -70,20 +70,20 @@ export function AppShell({
   return (
     <div className="relative min-h-screen overflow-hidden bg-background text-foreground">
       <div className="pointer-events-none absolute inset-0 opacity-100">
-        <div className="absolute -top-40 left-1/2 h-[34rem] w-[60rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
-        <div className="absolute right-[-10rem] top-28 h-96 w-96 rounded-full bg-cyan-500/10 blur-3xl" />
-        <div className="absolute bottom-[-8rem] left-[-12rem] h-[30rem] w-[30rem] rounded-full bg-emerald-500/10 blur-3xl" />
+        <div className="absolute -top-32 left-1/2 h-[28rem] w-[52rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
+        <div className="absolute right-[-10rem] top-28 h-80 w-80 rounded-full bg-emerald-500/10 blur-3xl" />
+        <div className="absolute bottom-[-8rem] left-[-12rem] h-[24rem] w-[24rem] rounded-full bg-amber-400/10 blur-3xl" />
       </div>
       <Toaster richColors position="top-right" />
       <div
         className={cn(
-          "relative z-10 mx-auto grid min-h-screen max-w-[1680px] gap-4 px-4 py-4 sm:px-6 lg:px-6 xl:px-8",
+          "relative z-10 mx-auto grid min-h-screen max-w-[1680px] gap-5 px-4 py-4 sm:px-6 lg:px-6 xl:px-8",
           isSidebarCollapsed ? "lg:grid-cols-[5.5rem_minmax(0,1fr)]" : "lg:grid-cols-[18rem_minmax(0,1fr)]",
         )}
       >
         <aside
           className={cn(
-            "rounded-[2rem] border border-border/70 bg-card/70 p-4 shadow-[0_24px_70px_rgba(4,8,20,0.35)] backdrop-blur-xl lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:self-start",
+            "rounded-[2rem] border border-border/70 bg-card/90 p-4 shadow-[0_18px_50px_rgba(18,32,51,0.08)] backdrop-blur-xl lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:self-start",
             isSidebarCollapsed && "lg:p-3",
           )}
         >
@@ -99,9 +99,7 @@ export function AppShell({
                 <p className="font-display text-lg font-semibold leading-tight">AAPL Catch-Up</p>
                 {settings.isDemoMode ? <Badge variant="warning">Demo</Badge> : null}
               </div>
-              <p className="mt-1 text-sm text-muted-foreground">
-                A focused rebuild workspace.
-              </p>
+              <p className="mt-1 text-sm text-muted-foreground">A focused rebuild workspace.</p>
             </div>
             <Button
               aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -119,7 +117,7 @@ export function AppShell({
           </div>
 
           <div className="mt-4 grid gap-3">
-            <div className={cn("rounded-2xl border border-border/70 bg-background/50 p-4", isSidebarCollapsed && "lg:hidden")}>
+            <div className={cn("rounded-2xl border border-border/70 bg-muted/45 p-4", isSidebarCollapsed && "lg:hidden")}>
               <p className="text-xs font-medium uppercase tracking-[0.25em] text-muted-foreground">
                 Currency
               </p>
@@ -172,7 +170,7 @@ export function AppShell({
         </aside>
 
         <div className="flex min-w-0 flex-col gap-4">
-          <header className="rounded-[2rem] border border-border/70 bg-card/70 p-5 shadow-[0_24px_70px_rgba(4,8,20,0.35)] backdrop-blur-xl sm:p-6">
+          <header className="rounded-[2rem] border border-border/70 bg-card/90 p-5 shadow-[0_18px_50px_rgba(18,32,51,0.08)] backdrop-blur-xl sm:p-6">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
               <div className="space-y-3">
                 <p className="text-xs font-medium uppercase tracking-[0.3em] text-muted-foreground">
@@ -197,7 +195,7 @@ export function AppShell({
             <div>{children}</div>
           </main>
 
-          <footer className="rounded-[1.5rem] border border-border/70 bg-card/60 px-5 py-4 text-xs text-muted-foreground backdrop-blur-xl">
+          <footer className="rounded-[1.5rem] border border-border/70 bg-card/80 px-5 py-4 text-xs text-muted-foreground backdrop-blur-xl">
             For personal tracking only. This is not financial advice and may not reflect tax,
             brokerage, or market-data limitations.
           </footer>

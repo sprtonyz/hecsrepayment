@@ -93,8 +93,8 @@ export function SetupWizard() {
 
   return (
     <AppShell
-      title="Setup"
-      subtitle="Create the AAPL Catch-Up Tracker with USD sale details and a 600 AUD/month rebuild plan."
+      title="Get started"
+      subtitle="Enter the sale details once, then set the monthly rebuild plan and data preferences."
     >
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <Card>
@@ -262,7 +262,7 @@ export function SetupWizard() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Core Model</CardTitle>
+            <CardTitle>Core model</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm text-muted-foreground">
             <p>Original benchmark: AAPL position in USD.</p>

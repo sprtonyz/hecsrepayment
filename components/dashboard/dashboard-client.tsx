@@ -1096,8 +1096,8 @@ export function DashboardClient() {
 
   return (
     <AppShell
-      title="Dashboard"
-      subtitle="See whether your rebuild is ahead, behind, or close to the Had I Held benchmark at a glance."
+      title="Overview"
+      subtitle="Track where you stand, what changed, and what needs attention in one clean view."
     >
       <div className="space-y-5">
         <section className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.85fr)]">
@@ -1115,9 +1115,9 @@ export function DashboardClient() {
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium uppercase text-muted-foreground">
-                        {isAhead ? "School-decision advantage" : "School-decision gap"}
+                        {isAhead ? "Monthly position" : "Monthly gap"}
                       </p>
-                      <InfoTip title="School-decision gap">
+                      <InfoTip title="Debt-adjusted gap">
                         <p>
                           This is the gap between the debt-adjusted school-decision paths:
                           Keep AAPL while making the monthly school repayment versus pay off the
@@ -1129,11 +1129,13 @@ export function DashboardClient() {
                     <h2 className="mt-2 text-4xl font-semibold tracking-normal md:text-5xl">
                       {decisionGapPrimary}
                     </h2>
-                    <p className="mt-2 text-base text-muted-foreground">
-                      {decisionGapSecondary}
-                    </p>
-                  </div>
+                  <p className="mt-2 text-base text-muted-foreground">
+                    {isAhead
+                      ? "A simple signal that the rebuild path is currently ahead."
+                      : decisionGapSecondary}
+                  </p>
                 </div>
+              </div>
 
                 <div className="rounded-lg border bg-background/80 p-4 lg:min-w-[260px]">
                   <p className="text-sm font-medium text-muted-foreground">Progress</p>
@@ -1149,13 +1151,13 @@ export function DashboardClient() {
 
               <div className="grid gap-3 md:grid-cols-2">
                 <HeroStat
-                  label="Suggested deposit this month"
+                  label="Suggested deposit"
                   value={displayAudValue(depositGuide.recommendedDepositAud)}
                   note={`${displayAudValue(depositGuide.minThisMonthAud)} to ${displayAudValue(depositGuide.maxThisMonthAud)} guardrail range.`}
                   tip="This is the deposit guide amount for the current month. It starts from your normal plan and then applies the guardrail."
                 />
                 <HeroStat
-                  label="Still to log"
+                  label="Left to log"
                   value={displayAudValue(depositGuide.remainingThisMonthAud)}
                   note="Based on contributions already dated this month."
                   tip="This is the remaining amount to log to reach the suggested deposit for this month."
@@ -1181,7 +1183,7 @@ export function DashboardClient() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <ListChecks className="h-5 w-5 text-primary" />
-                What Needs Attention
+                Next steps
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -1190,8 +1192,8 @@ export function DashboardClient() {
                 title={hasTrades ? "Monthly buy tracking" : "Start with your first buy"}
                 text={
                   hasTrades
-                    ? `${formatShares(metrics.currentRebuildShares)} AAPL shares are currently logged in the Rebuild Portfolio.`
-                    : "Add a contribution and either enter shares bought or let the app estimate shares from the AAPL price."
+                    ? `${formatShares(metrics.currentRebuildShares)} AAPL shares are currently logged.`
+                    : "Add a contribution and let the app estimate shares from the latest AAPL price."
                 }
                 tone={hasTrades ? "ok" : "action"}
               />
@@ -1220,7 +1222,7 @@ export function DashboardClient() {
         <section className="grid gap-4 lg:grid-cols-3">
           <SummaryTile
             icon={<Landmark className="h-5 w-5" />}
-            title="Had I Held"
+            title="If you'd held"
             value={displayUsdValue(metrics.hadHeldTotalValueUsd)}
             description="What the original AAPL position is worth today."
             rows={[
@@ -1231,7 +1233,7 @@ export function DashboardClient() {
           />
           <SummaryTile
             icon={<Wallet className="h-5 w-5" />}
-            title="Rebuild Portfolio"
+            title="Current rebuild"
             value={displayUsdValue(rebuildHeadlineUsd)}
             description={
               metrics.cashBalanceUsd < 0
@@ -1247,7 +1249,7 @@ export function DashboardClient() {
           />
           <SummaryTile
             icon={<TrendingUp className="h-5 w-5" />}
-            title="Main Deposit Guide"
+            title="Deposit guide"
             value={displayAudValue(depositGuide.recommendedDepositAud)}
             description={`Remaining this month: ${displayAudValue(depositGuide.remainingThisMonthAud)}.`}
             rows={[
@@ -1262,7 +1264,7 @@ export function DashboardClient() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <TrendingUp className="h-5 w-5 text-primary" />
-              Main Deposit Guide
+              Deposit guide
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -1336,7 +1338,7 @@ export function DashboardClient() {
               </div>
               <div className="rounded-lg border bg-background p-4">
                 <p className="text-sm font-medium">
-                  Review summary for {reviewSummarySource.symbol}
+                  News summary for {reviewSummarySource.symbol}
                 </p>
                 <div className="mt-3 grid gap-3">
                   {guideReviewSummary.map((section) => (
@@ -1684,7 +1686,7 @@ export function DashboardClient() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <GraduationCap className="h-5 w-5 text-primary" />
-                School Repayment Decision
+                Debt vs rebuild
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1763,7 +1765,7 @@ export function DashboardClient() {
         ) : null}
 
         <DetailsPanel
-          title="Detailed AAPL Numbers"
+          title="Detailed numbers"
           description="Open this when you want the formula-level breakdown."
         >
           <div className="grid gap-3 lg:grid-cols-2">
@@ -1821,7 +1823,7 @@ export function DashboardClient() {
         </DetailsPanel>
 
         <DetailsPanel
-          title="Market Data and Assumptions"
+          title="Market data and assumptions"
           description={`AAPL price is ${quoteLabel}; refresh only when you need a current value.`}
         >
           <div className="space-y-4">
@@ -2584,10 +2586,10 @@ function SchoolMonthSummary({
     <div className="rounded-lg border bg-background p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-medium">School decision</p>
+          <p className="text-sm font-medium">Debt decision</p>
           <p className="mt-1 text-sm text-muted-foreground">This is a net-worth check for today.</p>
         </div>
-        <InfoTip title="School decision">
+        <InfoTip title="Debt decision">
           <p>
             In plain terms: keep AAPL counts the old AAPL holding value, then
             subtracts this month&apos;s school repayment. Pay off and rebuild counts

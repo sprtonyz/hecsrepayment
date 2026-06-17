@@ -288,7 +288,7 @@ export function TransactionsClient() {
   return (
     <AppShell
       title="Transactions"
-      subtitle="Log AUD contributions and AAPL buys or sells. AAPL prices stay USD-based."
+      subtitle="Log contributions and AAPL buys or sells in a clear ledger view."
     >
       <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
         <div className="space-y-6">
@@ -598,7 +598,7 @@ export function TransactionsClient() {
                 <div className="space-y-1">
                   <CardTitle>Statement cycle</CardTitle>
                   <p className="text-sm text-muted-foreground">
-                    Browse past statement months without changing any transaction entries.
+                    Browse past statement months without changing any entries.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -664,7 +664,7 @@ export function TransactionsClient() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Transaction Ledger</CardTitle>
+              <CardTitle>Transaction ledger</CardTitle>
             </CardHeader>
             <CardContent>
             {rows.length === 0 ? (
