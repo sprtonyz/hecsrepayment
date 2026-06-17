@@ -19,7 +19,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AAPL Catch-Up Tracker",
+  title: "Rebuild Hub",
   description:
     "A focused local-first workspace for rebuilding an AAPL position with AUD contributions.",
 };

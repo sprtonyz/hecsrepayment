@@ -50,7 +50,7 @@ export const tradeSchema = z.object({
 
 export const settingsSchema = z.object({
   baseTicker: z.string().min(1).default("AAPL"),
-  displayCurrency: currencySchema.default("USD"),
+  displayCurrency: currencySchema.default("AUD"),
   baseValuationCurrency: z.literal("USD").default("USD"),
   contributionPlanCurrency: z.literal("AUD").default("AUD"),
   planMonthlyContributionAud: positiveNumber.default(600),

@@ -31,7 +31,7 @@ export function SetupWizard() {
   const [planMonthlyContributionAud, setPlanMonthlyContributionAud] = useState("600");
   const [planStartDate, setPlanStartDate] = useState(todayIso());
   const [planYears, setPlanYears] = useState("5");
-  const [displayCurrency, setDisplayCurrency] = useState<"USD" | "AUD">("USD");
+  const [displayCurrency, setDisplayCurrency] = useState<"USD" | "AUD">("AUD");
   const [defaultPriceMode, setDefaultPriceMode] = useState<PriceMode>("live");
   const [marketDataProvider, setMarketDataProvider] = useState<MarketProviderName>("finnhub");
   const [includeDividends, setIncludeDividends] = useState(true);

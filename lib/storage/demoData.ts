@@ -24,7 +24,7 @@ export function createDefaultSettings(): AppSettings {
   return {
     id: "singleton",
     baseTicker: "AAPL",
-    displayCurrency: "USD",
+    displayCurrency: "AUD",
     baseValuationCurrency: "USD",
     contributionPlanCurrency: "AUD",
     planMonthlyContributionAud: 600,

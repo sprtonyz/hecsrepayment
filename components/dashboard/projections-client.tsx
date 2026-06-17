@@ -525,14 +525,14 @@ export function ProjectionsClient() {
 
         <div className="grid gap-4 lg:grid-cols-4">
           <MetricCard
-            title="AAPL-Only Catch-Up"
+            title="AAPL Rebuild"
             value={formatCatchUpDate(selectedProjection.catchUpDate)}
             description={`${displayAudValue(Math.max(0, selectedMonthlyContributionAud))}/month, ${selectedScenarioLabel.toLowerCase()} case.`}
             tone={selectedProjection.catchUpDate ? "positive" : "warning"}
             tooltip="The first projected month where the rebuilt AAPL path equals or passes Had I Held."
           />
           <MetricCard
-            title="AAPL-Only Gap"
+            title="AAPL Rebuild Gap"
             value={formatGap(selectedProjection.projectedGapUsd, displayUsdValue)}
             description={`At ${safeProjectionMonths} months from today.`}
             tone={selectedProjection.projectedGapUsd <= 0 ? "positive" : "default"}

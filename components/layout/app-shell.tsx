@@ -96,7 +96,7 @@ export function AppShell({
             </Link>
             <div className={cn("min-w-0 flex-1", isSidebarCollapsed && "lg:hidden")}>
               <div className="flex flex-wrap items-center gap-2">
-                <p className="text-lg font-semibold leading-tight text-white">AAPL Catch-Up</p>
+                <p className="text-lg font-semibold leading-tight text-white">Rebuild Hub</p>
                 {settings.isDemoMode ? <Badge variant="warning">Demo</Badge> : null}
               </div>
               <p className="mt-1 text-sm text-slate-400">Version 2 shell</p>
@@ -117,12 +117,7 @@ export function AppShell({
           </div>
 
           <div className="mt-4 grid gap-3">
-            <div
-              className={cn(
-                "rounded-[1.5rem] border border-white/8 bg-white/4 p-4",
-                isSidebarCollapsed && "lg:hidden",
-              )}
-            >
+            <div className={cn("rounded-[1.5rem] border border-white/8 bg-white/4 p-4", isSidebarCollapsed && "lg:hidden")}>
               <p className="text-xs font-medium uppercase tracking-[0.28em] text-slate-500">
                 Currency
               </p>
@@ -212,16 +207,6 @@ export function AppShell({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={syncBadgeVariant(syncState.state)}>{syncState.label}</Badge>
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-border/80 bg-white/80 text-slate-700 shadow-[0_8px_20px_rgba(19,33,59,0.06)]"
-                onClick={() =>
-                  void setDisplayCurrency(settings.displayCurrency === "USD" ? "AUD" : "USD")
-                }
-              >
-                {settings.displayCurrency === "USD" ? "Cash view" : "Value view"}
-              </Button>
             </div>
           </header>
 

@@ -803,7 +803,7 @@ export function useTrackerData() {
         trades: [],
       });
       await load();
-      toast.success("Catch-Up Tracker created");
+      toast.success("Rebuild Hub created");
     },
     [load, syncCoreSnapshot],
   );

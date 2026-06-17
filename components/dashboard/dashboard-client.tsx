@@ -608,7 +608,7 @@ export function DashboardClient() {
   if (!saleEvent) {
     return (
       <AppShell
-        title="Create Your Catch-Up Tracker"
+        title="Create Your Rebuild Hub"
         subtitle="Enter the original AAPL sale details or load demo data to explore the app first."
       >
         <Card>
@@ -1780,7 +1780,7 @@ export function DashboardClient() {
             <DetailRow label="Rebuild dividends" value={displayUsdValue(metrics.rebuildDividendCashUsd)} />
             <DetailRow label="Cash balance" value={displayUsdValue(metrics.cashBalanceUsd)} />
             <DetailRow label="Total rebuild value" value={displayUsdValue(metrics.rebuildTotalValueUsd)} strong />
-            <DetailRow label="AAPL-only Catch-Up Gap" value={signedDisplayValue(metrics.catchUpGapUsd)} strong />
+            <DetailRow label="AAPL rebuild gap" value={signedDisplayValue(metrics.catchUpGapUsd)} strong />
             <DetailRow label="Deposit progress" value={`${formatPercent(metrics.depositProgressPercent)}%`} />
             <DetailRow label="Portfolio gain" value={displayUsdValue(metrics.portfolioGainUsd)} />
             <DetailRow label="Opportunity cost since sale" value={displayUsdValue(metrics.opportunityCostSinceSaleUsd)} />
@@ -1796,7 +1796,7 @@ export function DashboardClient() {
             <ChartBlock title="Had I Held vs Rebuild Portfolio">
               <ValueLineChart data={series} />
             </ChartBlock>
-            <ChartBlock title="AAPL-only Catch-Up Gap Over Time">
+            <ChartBlock title="AAPL rebuild gap over time">
               <GapAreaChart data={series} />
             </ChartBlock>
             <ChartBlock title="Contributions vs Portfolio Gain">

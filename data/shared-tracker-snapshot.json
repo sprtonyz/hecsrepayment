@@ -9,7 +9,7 @@
       "dividendMode": "cash",
       "includeSplits": true,
       "planStartDate": "2026-06-14",
-      "displayCurrency": "USD",
+      "displayCurrency": "AUD",
       "defaultPriceMode": "live",
       "includeDividends": true,
       "studyLoanEnabled": true,

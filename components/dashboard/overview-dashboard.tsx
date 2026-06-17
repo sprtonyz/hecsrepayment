@@ -3,14 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  ArrowRight,
   CheckCircle2,
   CircleDollarSign,
-  Clock3,
   LineChart,
   ListChecks,
   Target,
-  TrendingUp,
   Wallet,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -251,47 +248,50 @@ export function DashboardOverview() {
     <AppShell title="Dashboard" subtitle="See your status at a glance. Less jargon, more meaning.">
       <div className="grid gap-4 lg:gap-5">
         <section className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_20rem]">
-          <Card className="bg-[#fbfbf7]">
+          <Card className="border border-slate-800/70 bg-[#0f1830] text-slate-100 shadow-[0_30px_100px_rgba(2,6,23,0.36)]">
             <CardContent className="p-5 sm:p-6 lg:p-7">
               <div className="flex flex-col gap-6">
                 <div className="space-y-4">
-                  <p className="text-sm font-semibold text-emerald-600">{heroLabel}</p>
-                  <p className="text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">
+                  <p className="text-sm font-semibold text-emerald-400">{heroLabel}</p>
+                  <p className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">
                     {heroValue} {heroValueLabel}
                   </p>
-                  <p className="max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
+                  <p className="max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
                     {heroSummary}
                   </p>
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_21rem]">
-                  <div className="rounded-[1.6rem] border border-emerald-100 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                  <div className="rounded-[1.6rem] border border-white/10 bg-white/5 p-5 shadow-[0_10px_30px_rgba(15,23,42,0.12)]">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <p className="text-sm font-semibold text-slate-950">Monthly pace</p>
-                        <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
+                        <p className="text-sm font-semibold text-white">Monthly pace</p>
+                        <p className="mt-2 text-3xl font-semibold tracking-tight text-white">
                           {formatMoney(currentMonthContributionAud)}
                         </p>
                       </div>
-                      <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+                      <div className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300">
                         {Math.round(progressPercent)}% logged
                       </div>
                     </div>
                     <div className="mt-4">
-                      <Progress value={progressPercent} className="h-3 bg-slate-100" />
+                      <Progress value={progressPercent} className="h-3 bg-white/8" />
                     </div>
-                    <p className="mt-3 text-sm leading-6 text-slate-600">
+                    <p className="mt-3 text-sm leading-6 text-slate-300">
                       {formatMoney(gapRemainingAud)} remains to hit the monthly target of {formatMoney(settings.planMonthlyContributionAud)}.
                     </p>
                   </div>
 
-                  <div className="rounded-[1.6rem] border border-slate-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-                    <p className="text-sm font-semibold text-emerald-600">On track</p>
-                    <p className="mt-3 text-sm font-medium text-slate-500">Progress</p>
+                  <div className="rounded-[1.6rem] border border-white/10 bg-white/5 p-5 shadow-[0_10px_30px_rgba(15,23,42,0.12)]">
+                    <p className="text-sm font-semibold text-emerald-400">On track</p>
+                    <p className="mt-3 text-sm font-medium text-slate-400">Progress</p>
                     <div className="mt-2">
-                      <Progress value={Math.max(10, Math.min(100, metrics.catchUpProgressPercent))} className="h-3 bg-slate-100" />
+                      <Progress
+                        value={Math.max(10, Math.min(100, metrics.catchUpProgressPercent))}
+                        className="h-3 bg-white/8"
+                      />
                     </div>
-                    <p className="mt-4 text-sm leading-6 text-slate-600">
+                    <p className="mt-4 text-sm leading-6 text-slate-300">
                       {Math.round(metrics.catchUpProgressPercent)}% of the catch-up target is already covered.
                       Only one clear decision remains: keep logging, pause, or review the plan.
                     </p>
@@ -301,33 +301,33 @@ export function DashboardOverview() {
             </CardContent>
           </Card>
 
-          <Card className="bg-white">
+          <Card className="border border-slate-800/70 bg-[#0f1830] text-slate-100 shadow-[0_30px_100px_rgba(2,6,23,0.28)]">
             <CardContent className="p-5 sm:p-6">
               <div className="flex h-full flex-col">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-slate-950">{statusLabel}</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-500">Progress</p>
+                    <p className="text-sm font-semibold text-white">{statusLabel}</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">Progress</p>
                   </div>
-                  <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
+                  <Badge variant="outline" className="border-emerald-500/20 bg-emerald-500/10 text-emerald-200">
                     Updated now
                   </Badge>
                 </div>
 
                 <div className="mt-4">
-                  <Progress value={Math.min(100, progressPercent)} className="h-3 bg-slate-100" />
+                  <Progress value={Math.min(100, progressPercent)} className="h-3 bg-white/8" />
                 </div>
 
-                <div className="mt-5 flex-1 rounded-[1.4rem] bg-slate-50 p-4">
+                <div className="mt-5 flex-1 rounded-[1.4rem] border border-white/10 bg-white/5 p-4">
                   <div className="flex items-start gap-3">
-                    <div className="rounded-2xl bg-emerald-100 p-2 text-emerald-700">
+                    <div className="rounded-2xl bg-emerald-500/15 p-2 text-emerald-300">
                       <CheckCircle2 className="h-4 w-4" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-slate-900">
+                      <p className="text-sm font-medium text-white">
                         {Math.round(progressPercent)}% of the monthly target is already logged.
                       </p>
-                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                      <p className="mt-2 text-sm leading-6 text-slate-300">
                         {formatMoney(gapRemainingAud)} is the only number left to close if the goal is to stay on the same track.
                       </p>
                     </div>
@@ -363,16 +363,16 @@ export function DashboardOverview() {
         </section>
 
         <section className="grid gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
-          <Card className="bg-white">
+          <Card className="border border-slate-800/70 bg-[#0f1830] text-slate-100 shadow-[0_30px_100px_rgba(2,6,23,0.28)]">
             <CardContent className="p-5 sm:p-6">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm font-semibold text-slate-500">What needs attention</p>
-                  <h2 className="mt-2 max-w-lg text-2xl font-semibold tracking-tight text-slate-950 sm:text-[2rem]">
+                  <p className="text-sm font-semibold text-slate-400">What needs attention</p>
+                  <h2 className="mt-2 max-w-lg text-2xl font-semibold tracking-tight text-white sm:text-[2rem]">
                     Three plain-language prompts replace the old long checklist.
                   </h2>
                 </div>
-                <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600">
+                <Badge variant="outline" className="border-white/10 bg-white/5 text-slate-200">
                   3 actions
                 </Badge>
               </div>
@@ -406,21 +406,21 @@ export function DashboardOverview() {
             </CardContent>
           </Card>
 
-          <Card className="bg-white">
+          <Card className="border border-slate-800/70 bg-[#0f1830] text-slate-100 shadow-[0_30px_100px_rgba(2,6,23,0.28)]">
             <CardContent className="p-5 sm:p-6">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-sm font-semibold text-slate-500">Recent activity</p>
-                  <h2 className="mt-2 max-w-md text-2xl font-semibold tracking-tight text-slate-950 sm:text-[2rem]">
+                  <p className="text-sm font-semibold text-slate-400">Recent activity</p>
+                  <h2 className="mt-2 max-w-md text-2xl font-semibold tracking-tight text-white sm:text-[2rem]">
                     A visual feed that feels like a timeline, not a spreadsheet.
                   </h2>
                 </div>
-                <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600">
+                <Badge variant="outline" className="border-white/10 bg-white/5 text-slate-200">
                   10 months
                 </Badge>
               </div>
 
-              <div className="mt-6 rounded-[1.6rem] bg-slate-50 p-4">
+              <div className="mt-6 rounded-[1.6rem] border border-white/8 bg-white/5 p-4">
                 <div className="flex h-56 items-end gap-3">
                   {recentBars.map((bar) => (
                     <div key={`${bar.label}-${bar.index}`} className="flex min-h-0 flex-1 flex-col items-center justify-end gap-2">
@@ -435,13 +435,13 @@ export function DashboardOverview() {
                           style={{ height: `${Math.max(18, bar.height)}%` }}
                         />
                       </div>
-                      <span className="text-[11px] font-medium text-slate-500">{bar.label}</span>
+                      <span className="text-[11px] font-medium text-slate-400">{bar.label}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <p className="mt-4 text-sm leading-6 text-slate-500">
+              <p className="mt-4 text-sm leading-6 text-slate-400">
                 This trend card stays visual so the user does not have to decode a table.
               </p>
             </CardContent>
@@ -449,8 +449,8 @@ export function DashboardOverview() {
         </section>
 
         <section className="grid gap-4">
-          <Card className="overflow-hidden bg-white">
-            <div className="border-b border-slate-200 bg-[#0f1830] px-5 py-5 text-white sm:px-6">
+          <Card className="overflow-hidden border border-slate-800/70 bg-[#0f1830] text-slate-100 shadow-[0_30px_100px_rgba(2,6,23,0.32)]">
+            <div className="border-b border-white/10 bg-[#101a32] px-5 py-5 text-white sm:px-6">
               <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                 <div className="space-y-2">
                   <p className="text-sm font-semibold uppercase tracking-[0.28em] text-slate-400">
@@ -477,22 +477,22 @@ export function DashboardOverview() {
             </div>
             <CardContent className="p-5 sm:p-6">
               <Tabs defaultValue="compare" className="w-full">
-                <TabsList className="grid h-auto w-full grid-cols-3 rounded-[1.4rem] bg-slate-100 p-1">
+                <TabsList className="grid h-auto w-full grid-cols-3 rounded-[1.4rem] border border-white/8 bg-white/5 p-1">
                   <TabsTrigger value="compare">Compare stocks</TabsTrigger>
                   <TabsTrigger value="plan">Plan view</TabsTrigger>
                   <TabsTrigger value="details">Raw details</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="compare" className="mt-5">
-                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-                    <div className="rounded-[1.6rem] border border-slate-200 bg-slate-50 p-4 sm:p-5">
+                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
+                    <div className="rounded-[1.6rem] border border-white/10 bg-white/5 p-5 sm:p-6">
                       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                         <div>
-                          <p className="text-sm font-semibold text-slate-500">Strongest ticket</p>
-                          <h3 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
+                          <p className="text-sm font-semibold text-slate-400">Strongest ticket</p>
+                          <h3 className="mt-2 text-3xl font-semibold tracking-tight text-white">
                             {bestComparisonReview?.symbol ?? "Loading"}
                           </h3>
-                          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-600">
+                          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-300">
                             {comparisonLoading
                               ? "Loading the current comparison bundles..."
                               : comparisonLeadingRationale}
@@ -516,7 +516,7 @@ export function DashboardOverview() {
                         </div>
                       </div>
 
-                      <div className="mt-5 grid gap-3 md:grid-cols-3">
+                      <div className="mt-5 grid gap-3 sm:grid-cols-3">
                         <MiniStatusChip
                           label="Fetched"
                           value={`${fetchedComparisonCount}/${COMPARISON_SYMBOLS.length}`}
@@ -535,13 +535,13 @@ export function DashboardOverview() {
                       </div>
 
                       {comparisonError ? (
-                        <div className="mt-4 rounded-[1.2rem] border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                        <div className="mt-4 rounded-[1.2rem] border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-100">
                           {comparisonError}
                         </div>
                       ) : null}
                     </div>
 
-                    <div className="grid gap-3">
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-1">
                       {comparisonReviews.map((item, index) => {
                         const digest = item.codexReview?.appliedNewsDigest;
                         const score = item.rankScore;
@@ -562,23 +562,23 @@ export function DashboardOverview() {
                         return (
                           <div
                             key={item.symbol}
-                            className="rounded-[1.4rem] border border-slate-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.04)]"
+                            className="rounded-[1.4rem] border border-white/10 bg-white/5 p-4 shadow-[0_10px_30px_rgba(15,23,42,0.1)]"
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div>
                                 <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">
                                   Rank {index + 1}
                                 </p>
-                                <p className="mt-1 text-lg font-semibold text-slate-950">{item.symbol}</p>
+                                <p className="mt-1 text-lg font-semibold text-white">{item.symbol}</p>
                               </div>
                               <div className="text-right">
-                                <p className="text-lg font-semibold text-slate-950">{scoreLabel}</p>
-                                <p className="text-xs text-slate-500">
+                                <p className="text-lg font-semibold text-white">{scoreLabel}</p>
+                                <p className="text-xs text-slate-400">
                                   {item.status === "loaded" ? "fit / 5" : "review status"}
                                 </p>
                               </div>
                             </div>
-                            <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+                            <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/8">
                               <div
                                 className={cn(
                                   "h-full rounded-full",
@@ -603,11 +603,11 @@ export function DashboardOverview() {
                               >
                                 {digest?.signal ?? "pending"}
                               </Badge>
-                              <Badge variant="outline">
+                              <Badge variant="outline" className="border-white/10 bg-white/5 text-slate-200">
                                 {digest?.confidence ? `${digest.confidence} confidence` : item.status}
                               </Badge>
                             </div>
-                            <p className="mt-3 text-sm leading-6 text-slate-600">
+                            <p className="mt-3 text-sm leading-6 text-slate-300">
                               {item.codexReview?.suggestedGuideImpact?.rationale ??
                                 item.codexReview?.rationale ??
                                 "No published rationale yet."}
@@ -621,12 +621,12 @@ export function DashboardOverview() {
 
                 <TabsContent value="plan" className="mt-5">
                   <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-                    <div className="rounded-[1.6rem] border border-slate-200 bg-slate-50 p-5">
-                      <p className="text-sm font-semibold text-slate-500">Plan view</p>
-                      <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+                    <div className="rounded-[1.6rem] border border-white/10 bg-white/5 p-5 sm:p-6">
+                      <p className="text-sm font-semibold text-slate-400">Plan view</p>
+                      <h3 className="mt-2 text-2xl font-semibold tracking-tight text-white">
                         A plain-language version of the original planning block.
                       </h3>
-                      <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
+                      <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
                         The dashboard now leads with the answer, while the planning layer stays
                         reachable for people who want the why behind it.
                       </p>
@@ -655,7 +655,7 @@ export function DashboardOverview() {
                       </div>
                     </div>
 
-                    <div className="rounded-[1.6rem] border border-slate-200 bg-[#0f1830] p-5 text-white">
+                    <div className="rounded-[1.6rem] border border-white/10 bg-[#101a32] p-5 text-white">
                       <p className="text-sm font-semibold text-slate-400">Short answer</p>
                       <p className="mt-3 text-2xl font-semibold tracking-tight">
                         {heroAhead ? "You are ahead this month." : "You are behind this month."}
@@ -700,29 +700,8 @@ export function DashboardOverview() {
           </Card>
         </section>
 
-        <section className="grid gap-4 md:grid-cols-3">
-          <InfoCard
-            title="Today"
-            value={formatMoney(currentMonthContributionAud)}
-            note="Deposit logged"
-            icon={<Clock3 className="h-4 w-4" />}
-          />
-          <InfoCard
-            title="Plan"
-            value={formatMoney(settings.planMonthlyContributionAud)}
-            note="Monthly target"
-            icon={<TrendingUp className="h-4 w-4" />}
-          />
-          <InfoCard
-            title="Catch-up"
-            value={catchUpValue}
-            note={catchUpLabel}
-            icon={<ArrowRight className="h-4 w-4" />}
-          />
-        </section>
-
-        {isLoading ? <p className="px-1 text-sm text-slate-500">Loading your local tracker...</p> : null}
-        {isRefreshing ? <p className="px-1 text-sm text-slate-500">Refreshing market data...</p> : null}
+        {isLoading ? <p className="px-1 text-sm text-slate-400">Loading your local tracker...</p> : null}
+        {isRefreshing ? <p className="px-1 text-sm text-slate-400">Refreshing market data...</p> : null}
       </div>
     </AppShell>
   );
@@ -743,19 +722,19 @@ function MiniMetricCard({
 }) {
   const palette =
     color === "emerald"
-      ? "bg-emerald-50 text-emerald-600"
+      ? "bg-emerald-500/15 text-emerald-300"
       : color === "amber"
-        ? "bg-amber-50 text-amber-600"
-        : "bg-blue-50 text-blue-600";
+        ? "bg-amber-500/15 text-amber-300"
+        : "bg-blue-500/15 text-blue-300";
 
   return (
-    <Card className="bg-white">
-      <CardContent className="p-5">
+    <Card className="border border-white/10 bg-white/5 text-slate-100">
+      <CardContent className="p-5 sm:p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-medium text-slate-500">{label}</p>
-            <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{value}</p>
-            <p className="mt-2 text-sm text-slate-500">{note}</p>
+            <p className="text-sm font-medium text-slate-400">{label}</p>
+            <p className="mt-2 text-3xl font-semibold tracking-tight text-white">{value}</p>
+            <p className="mt-2 text-sm leading-6 text-slate-400">{note}</p>
           </div>
           <div className={cn("rounded-2xl p-2.5", palette)}>{icon}</div>
         </div>
@@ -781,49 +760,22 @@ function ActionRow({
 }) {
   const accent =
     tone === "emerald"
-      ? "bg-emerald-50 text-emerald-600"
+      ? "bg-emerald-500/15 text-emerald-300"
       : tone === "amber"
-        ? "bg-amber-50 text-amber-600"
-        : "bg-blue-50 text-blue-600";
+        ? "bg-amber-500/15 text-amber-300"
+        : "bg-blue-500/15 text-blue-300";
 
   return (
-    <div className="flex items-center gap-3 rounded-[1.35rem] border border-slate-200 bg-[#fcfcff] p-3.5 shadow-[0_10px_24px_rgba(15,23,42,0.04)]">
+    <div className="flex items-center gap-3 rounded-[1.35rem] border border-white/10 bg-white/5 p-4 shadow-[0_10px_24px_rgba(15,23,42,0.12)]">
       <div className={cn("rounded-2xl p-2.5", accent)}>{icon}</div>
       <div className="min-w-0 flex-1">
-        <p className="font-medium text-slate-950">{title}</p>
-        <p className="mt-1 text-sm text-slate-500">{text}</p>
+        <p className="font-medium text-white">{title}</p>
+        <p className="mt-1 text-sm leading-6 text-slate-400">{text}</p>
       </div>
-      <Button asChild size="sm" variant="outline" className="border-slate-200 bg-white text-slate-700">
+      <Button asChild size="sm" variant="outline" className="border-white/10 bg-white/5 text-slate-100 hover:bg-white/10">
         <Link href={href}>{cta}</Link>
       </Button>
     </div>
-  );
-}
-
-function InfoCard({
-  title,
-  value,
-  note,
-  icon,
-}: {
-  title: string;
-  value: string;
-  note: string;
-  icon: React.ReactNode;
-}) {
-  return (
-    <Card className="bg-[#0f1830] text-white">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium text-slate-400">{title}</p>
-            <p className="mt-2 text-2xl font-semibold tracking-tight text-white">{value}</p>
-            <p className="mt-2 text-sm text-slate-400">{note}</p>
-          </div>
-          <div className="rounded-2xl bg-white/8 p-2.5 text-slate-200">{icon}</div>
-        </div>
-      </CardContent>
-    </Card>
   );
 }
 
@@ -837,19 +789,19 @@ function MiniStatusChip({
   note: string;
 }) {
   return (
-    <div className="rounded-[1.2rem] border border-slate-200 bg-white p-3">
+    <div className="rounded-[1.2rem] border border-white/10 bg-[#101a32] p-4">
       <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">{label}</p>
-      <p className="mt-2 text-lg font-semibold text-slate-950">{value}</p>
-      <p className="mt-1 text-sm leading-6 text-slate-500">{note}</p>
+      <p className="mt-2 text-lg font-semibold text-white">{value}</p>
+      <p className="mt-1 text-sm leading-6 text-slate-400">{note}</p>
     </div>
   );
 }
 
 function DetailTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[1.4rem] border border-slate-200 bg-white p-4 shadow-[0_10px_24px_rgba(15,23,42,0.04)]">
+    <div className="rounded-[1.4rem] border border-white/10 bg-white/5 p-4 shadow-[0_10px_24px_rgba(15,23,42,0.1)]">
       <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">{label}</p>
-      <p className="mt-2 text-lg font-semibold text-slate-950">{value}</p>
+      <p className="mt-2 text-lg font-semibold text-white">{value}</p>
     </div>
   );
 }
