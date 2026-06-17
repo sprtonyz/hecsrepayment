@@ -70,40 +70,40 @@ export function AppShell({
   return (
     <div className="relative min-h-screen overflow-hidden bg-background text-foreground">
       <div className="pointer-events-none absolute inset-0 opacity-100">
-        <div className="absolute -top-32 left-1/2 h-[28rem] w-[52rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
+        <div className="absolute -top-32 left-1/2 h-[28rem] w-[52rem] -translate-x-1/2 rounded-full bg-primary/12 blur-3xl" />
         <div className="absolute right-[-10rem] top-28 h-80 w-80 rounded-full bg-emerald-500/10 blur-3xl" />
         <div className="absolute bottom-[-8rem] left-[-12rem] h-[24rem] w-[24rem] rounded-full bg-amber-400/10 blur-3xl" />
       </div>
       <Toaster richColors position="top-right" />
       <div
         className={cn(
-          "relative z-10 mx-auto grid min-h-screen max-w-[1680px] gap-5 px-4 py-4 sm:px-6 lg:px-6 xl:px-8",
-          isSidebarCollapsed ? "lg:grid-cols-[5.5rem_minmax(0,1fr)]" : "lg:grid-cols-[18rem_minmax(0,1fr)]",
+          "relative z-10 mx-auto grid min-h-screen max-w-[1680px] gap-5 px-4 py-4 sm:px-6 lg:grid-cols-[18rem_minmax(0,1fr)] lg:px-6 xl:px-8",
+          isSidebarCollapsed && "lg:grid-cols-[5.5rem_minmax(0,1fr)]",
         )}
       >
         <aside
           className={cn(
-            "rounded-[2rem] border border-border/70 bg-card/80 p-4 shadow-[0_26px_90px_rgba(3,7,18,0.35)] backdrop-blur-xl lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:self-start",
+            "rounded-[2rem] border border-slate-800/80 bg-[#0f1830] p-4 text-slate-100 shadow-[0_30px_100px_rgba(15,23,42,0.35)] lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:self-start",
             isSidebarCollapsed && "lg:p-3",
           )}
         >
-          <div className="flex items-start gap-3 border-b border-border/70 pb-4">
+          <div className="flex items-start gap-3 border-b border-white/8 pb-4">
             <Link
               href="/dashboard"
-              className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-cyan-400 text-primary-foreground shadow-lg shadow-primary/20"
+              className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#3b6df6] text-white shadow-[0_14px_28px_rgba(59,109,246,0.35)]"
             >
               <BarChart3 className="h-5 w-5" />
             </Link>
             <div className={cn("min-w-0 flex-1", isSidebarCollapsed && "lg:hidden")}>
               <div className="flex flex-wrap items-center gap-2">
-                <p className="font-display text-lg font-semibold leading-tight">AAPL Catch-Up</p>
+                <p className="text-lg font-semibold leading-tight text-white">AAPL Catch-Up</p>
                 {settings.isDemoMode ? <Badge variant="warning">Demo</Badge> : null}
               </div>
-              <p className="mt-1 text-sm text-muted-foreground">A focused rebuild workspace.</p>
+              <p className="mt-1 text-sm text-slate-400">Version 2 shell</p>
             </div>
             <Button
               aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className="ml-auto inline-flex rounded-full"
+              className="ml-auto inline-flex rounded-full bg-white/5 text-white hover:bg-white/10"
               onClick={() => setIsSidebarCollapsed((current) => !current)}
               size="icon"
               variant="ghost"
@@ -117,15 +117,23 @@ export function AppShell({
           </div>
 
           <div className="mt-4 grid gap-3">
-            <div className={cn("rounded-2xl border border-border/70 bg-muted/45 p-4", isSidebarCollapsed && "lg:hidden")}>
-              <p className="text-xs font-medium uppercase tracking-[0.25em] text-muted-foreground">
+            <div
+              className={cn(
+                "rounded-[1.5rem] border border-white/8 bg-white/4 p-4",
+                isSidebarCollapsed && "lg:hidden",
+              )}
+            >
+              <p className="text-xs font-medium uppercase tracking-[0.28em] text-slate-500">
                 Currency
               </p>
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <Button
                   size="sm"
                   variant={settings.displayCurrency === "USD" ? "default" : "ghost"}
-                  className="w-full"
+                  className={cn(
+                    "w-full",
+                    settings.displayCurrency !== "USD" && "text-slate-200 hover:bg-white/10",
+                  )}
                   onClick={() => setDisplayCurrency("USD")}
                 >
                   USD
@@ -133,7 +141,10 @@ export function AppShell({
                 <Button
                   size="sm"
                   variant={settings.displayCurrency === "AUD" ? "default" : "ghost"}
-                  className="w-full"
+                  className={cn(
+                    "w-full",
+                    settings.displayCurrency !== "AUD" && "text-slate-200 hover:bg-white/10",
+                  )}
                   onClick={() => setDisplayCurrency("AUD")}
                 >
                   AUD
@@ -154,8 +165,8 @@ export function AppShell({
                       "h-12 justify-start rounded-2xl text-sm",
                       isSidebarCollapsed ? "lg:justify-center lg:px-0" : "px-4",
                       active
-                        ? "bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground shadow-lg shadow-primary/20"
-                        : "bg-transparent",
+                        ? "bg-[#3b6df6] text-white shadow-[0_14px_24px_rgba(59,109,246,0.32)]"
+                        : "bg-transparent text-slate-300 hover:bg-white/8 hover:text-white",
                     )}
                   >
                     <Link href={item.href}>
@@ -167,38 +178,56 @@ export function AppShell({
               })}
             </nav>
           </div>
+
+          <div className={cn("mt-6 rounded-[1.75rem] border border-white/8 bg-white/5 p-4", isSidebarCollapsed && "lg:hidden")}>
+            <p className="text-xs font-medium uppercase tracking-[0.28em] text-slate-500">Today&apos;s focus</p>
+            <p className="mt-3 text-sm leading-6 text-slate-200">
+              A quick glance should answer the question before the user has to dig.
+            </p>
+            <div className="mt-4 grid gap-2">
+              <Button size="sm" className="bg-emerald-400 text-slate-950 hover:bg-emerald-300">
+                Log today
+              </Button>
+              <Button size="sm" variant="outline" className="border-white/10 bg-white/5 text-white hover:bg-white/10">
+                Review entries
+              </Button>
+              <Button size="sm" variant="ghost" className="text-slate-200 hover:bg-white/10 hover:text-white">
+                Check trends
+              </Button>
+            </div>
+          </div>
         </aside>
 
         <div className="flex min-w-0 flex-col gap-4">
-          <header className="rounded-[2rem] border border-border/70 bg-card/90 p-5 shadow-[0_18px_50px_rgba(18,32,51,0.08)] backdrop-blur-xl sm:p-6">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-              <div className="space-y-3">
-                <p className="text-xs font-medium uppercase tracking-[0.3em] text-muted-foreground">
-                  Portfolio command center
+          <header className="flex flex-col gap-4 rounded-[1.5rem] px-1 pt-1 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-[0.28em] text-slate-500">
+                {title}
+              </p>
+              {subtitle ? (
+                <p className="max-w-3xl text-sm leading-6 text-slate-500 sm:text-base">
+                  {subtitle}
                 </p>
-                <h1 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">
-                  {title}
-                </h1>
-                {subtitle ? (
-                  <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
-                    {subtitle}
-                  </p>
-                ) : null}
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={syncBadgeVariant(syncState.state)}>{syncState.label}</Badge>
-              </div>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={syncBadgeVariant(syncState.state)}>{syncState.label}</Badge>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-border/80 bg-white/80 text-slate-700 shadow-[0_8px_20px_rgba(19,33,59,0.06)]"
+                onClick={() =>
+                  void setDisplayCurrency(settings.displayCurrency === "USD" ? "AUD" : "USD")
+                }
+              >
+                {settings.displayCurrency === "USD" ? "Cash view" : "Value view"}
+              </Button>
             </div>
           </header>
 
-          <main className="min-w-0 flex-1">
+          <main className="min-w-0 flex-1 pb-4">
             <div>{children}</div>
           </main>
-
-          <footer className="rounded-[1.5rem] border border-border/70 bg-card/70 px-5 py-4 text-xs text-muted-foreground backdrop-blur-xl">
-            For personal tracking only. This is not financial advice and may not reflect tax,
-            brokerage, or market-data limitations.
-          </footer>
         </div>
       </div>
     </div>
