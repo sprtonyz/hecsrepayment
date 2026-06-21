@@ -538,7 +538,7 @@ export function DashboardOverview({
           </Card>
         </section>
 
-        <section className="grid gap-4 md:grid-cols-3">
+        <section className="hidden gap-4 md:grid md:grid-cols-3">
           <MiniMetricCard
             color="emerald"
             icon={<Wallet className="h-4 w-4" />}
@@ -562,7 +562,48 @@ export function DashboardOverview({
           />
         </section>
 
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+        <section className="grid gap-3 md:hidden">
+          <details className="rounded-[1.4rem] border border-slate-800/70 bg-[#0f1830] text-slate-100 shadow-[0_20px_60px_rgba(2,6,23,0.2)]">
+            <summary className="cursor-pointer list-none rounded-[1.4rem] px-4 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-400">Monthly summary</p>
+                  <p className="mt-1 text-base font-semibold text-white">
+                    Logged this month, target this month, and gap to close
+                  </p>
+                </div>
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-slate-300">
+                  Tap to expand
+                </span>
+              </div>
+            </summary>
+            <div className="grid gap-3 px-4 pb-4 pt-0">
+              <MiniMetricCard
+                color="emerald"
+                icon={<Wallet className="h-4 w-4" />}
+                label="Logged this month"
+                value={formatMoney(currentMonthLoggedAud)}
+                note="Matches the plan so far."
+              />
+              <MiniMetricCard
+                color="blue"
+                icon={<Target className="h-4 w-4" />}
+                label="Target this month"
+                value={formatMoney(settings.planMonthlyContributionAud)}
+                note="What is still expected."
+              />
+              <MiniMetricCard
+                color="amber"
+                icon={<CircleDollarSign className="h-4 w-4" />}
+                label="Gap to close"
+                value={catchUpValue}
+                note={catchUpLabel}
+              />
+            </div>
+          </details>
+        </section>
+
+        <section className="hidden gap-4 md:grid xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
           <Card className="border border-slate-800/70 bg-[#0f1830] text-slate-100 shadow-[0_30px_100px_rgba(2,6,23,0.28)]">
             <CardContent className="p-5 sm:p-6">
               <div className="flex items-start justify-between gap-4">
@@ -724,6 +765,168 @@ export function DashboardOverview({
               </p>
             </CardContent>
           </Card>
+        </section>
+
+        <section className="grid gap-3 md:hidden">
+          <details className="rounded-[1.4rem] border border-slate-800/70 bg-[#0f1830] text-slate-100 shadow-[0_20px_60px_rgba(2,6,23,0.2)]">
+            <summary className="cursor-pointer list-none rounded-[1.4rem] px-4 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-400">Needs attention</p>
+                  <p className="mt-1 text-base font-semibold text-white">
+                    Three plain-language prompts replace the old long checklist.
+                  </p>
+                </div>
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-slate-300">
+                  Tap to expand
+                </span>
+              </div>
+            </summary>
+            <CardContent className="px-4 pb-4 pt-0">
+              <div className="grid gap-3">
+                <ActionPrompt
+                  icon={<CheckCircle2 className="h-4 w-4" />}
+                  title="Log today&apos;s deposit"
+                  text="One tap gets you back on track."
+                  cta="Do now"
+                  href="/transactions"
+                  tone="emerald"
+                />
+                <ActionPrompt
+                  icon={<Target className="h-4 w-4" />}
+                  title="Review transactions"
+                  text="Check for anything that looks wrong."
+                  cta="Check"
+                  href="/transactions"
+                  tone="amber"
+                />
+                <ActionPrompt
+                  icon={<ArrowRight className="h-4 w-4" />}
+                  title="Open projections"
+                  text="See how this month changes the story."
+                  cta="View"
+                  href="/projections"
+                  tone="blue"
+                />
+              </div>
+            </CardContent>
+          </details>
+
+          <details className="rounded-[1.4rem] border border-slate-800/70 bg-[#0f1830] text-slate-100 shadow-[0_20px_60px_rgba(2,6,23,0.2)]">
+            <summary className="cursor-pointer list-none rounded-[1.4rem] px-4 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-400">Recent activity</p>
+                  <p className="mt-1 text-base font-semibold text-white">
+                    A visual feed that feels like a timeline, not a spreadsheet.
+                  </p>
+                </div>
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-slate-300">
+                  Tap to expand
+                </span>
+              </div>
+            </summary>
+            <CardContent className="px-4 pb-4 pt-0">
+              <div className="rounded-[1.45rem] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.02))] p-3">
+                <div className="rounded-[1.15rem] border border-white/6 bg-[#0b1327] px-3 pt-3">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
+                      <span>
+                        {safeRecentWindowStart + 1} to {visibleWindowEnd} of {recentBars.length}
+                      </span>
+                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-slate-300">
+                        12 months at a time
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 border-white/10 bg-white/5 px-3 text-slate-200 hover:bg-white/10"
+                        onClick={() =>
+                          setRecentWindowStart((current) => Math.max(0, current - recentWindowSize))
+                        }
+                        disabled={safeRecentWindowStart === 0}
+                      >
+                        <ChevronLeft className="mr-1 h-4 w-4" />
+                        Prev 12
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 border-white/10 bg-white/5 px-3 text-slate-200 hover:bg-white/10"
+                        onClick={() =>
+                          setRecentWindowStart((current) =>
+                            Math.min(maxRecentWindowStart, current + recentWindowSize),
+                          )
+                        }
+                        disabled={safeRecentWindowStart === maxRecentWindowStart}
+                      >
+                        Next 12
+                        <ChevronRight className="ml-1 h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-12 gap-1 overflow-hidden pb-2 sm:gap-2">
+                    {visibleRecentBars.map((bar) => {
+                      const isSelected = selectedRecentBarIndex === bar.index;
+                      return (
+                        <button
+                          key={`${bar.label}-${bar.index}`}
+                          type="button"
+                          onClick={() => setSelectedRecentBarIndex(bar.index)}
+                          onMouseEnter={() => setSelectedRecentBarIndex(bar.index)}
+                          onFocus={() => setSelectedRecentBarIndex(bar.index)}
+                          className="group flex h-40 min-w-0 flex-col justify-end gap-1 rounded-none outline-none transition-transform duration-200 focus-visible:ring-2 focus-visible:ring-white/40"
+                          aria-pressed={isSelected}
+                          aria-label={`${bar.fullLabel}: ${formatMoney(bar.valueAud)}`}
+                        >
+                          <div className="flex h-full w-full items-end justify-center overflow-visible">
+                            <div
+                              className={cn(
+                                "w-full rounded-none bg-[#5f88f8] shadow-[0_10px_18px_rgba(59,109,246,0.16)] transition-all duration-200",
+                                bar.valueAud <= 0 ? "opacity-30" : "opacity-95",
+                                isSelected && "opacity-100 ring-2 ring-white/45",
+                              )}
+                              style={{ height: `${Math.max(2, bar.height)}%` }}
+                            />
+                          </div>
+                          <span
+                            className={cn(
+                              "text-[10px] font-medium leading-none tracking-[0.12em]",
+                              isSelected ? "text-white" : "text-slate-400",
+                            )}
+                          >
+                            {bar.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-3 rounded-[1.1rem] border border-white/10 bg-[#101a32] px-3 py-3">
+                    <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">
+                          Selected month
+                        </p>
+                        <p className="mt-1 text-base font-semibold text-white sm:text-lg">
+                          {selectedRecentBar?.fullLabel ?? "No activity yet"}
+                        </p>
+                      </div>
+                      <div className="text-left sm:text-right">
+                        <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">
+                          Monthly logged
+                        </p>
+                        <p className="mt-1 text-xl font-semibold text-white sm:text-2xl">
+                          {selectedRecentBar ? formatMoney(selectedRecentBar.valueAud) : formatMoney(0)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </details>
         </section>
 
         <section className="grid gap-4">
