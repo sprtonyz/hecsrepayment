@@ -71,6 +71,7 @@ export function buildCodexReviewBrief({
       ageBucket: article.ageBucket,
       headlineRuleSignal: article.headlineRuleSignal,
       headlineRuleScore: article.headlineRuleScore,
+      reviewScoreHint: buildReviewScoreHint(article, likelyNoiseFlags, durableThemeHints),
       matchedTerms: article.matchedTerms,
       articleTextStatus: article.articleTextStatus,
       excerptChars: article.readableTextExcerpt.length,
@@ -120,6 +121,7 @@ export function buildCodexReviewBrief({
       "Read reviewerProfile first so the standing analyst charter and company context are in view before triage.",
       "Read guideSnapshot and coverage first to understand what the app was going to do before this review.",
       "Use articleReviewTable.reviewPriority to triage the bundle before opening long readableTextExcerpt fields.",
+      "Use articleReviewTable.reviewScoreHint to tell a mild signal from a strong one instead of flattening every material item into the same bucket.",
       "Downweight rows with likelyNoiseFlags unless their excerpt reveals a direct company business impact.",
       "For durableThemeHints, check the full excerpt and decide whether the guide signal, confidence, or deposit suggestion should change.",
       "If a codexReview already exists in this file, update it only if the new bundle evidence changes the materiality call.",
@@ -303,6 +305,38 @@ function reviewPriority(
   return "medium";
 }
 
+function buildReviewScoreHint(
+  article: ReviewBundleArticle,
+  likelyNoiseFlags: string[],
+  durableThemeHints: string[],
+) {
+  const analysis = article.existingApiAnalysis;
+  const direction = analysis
+    ? signalDirection(analysis.signal)
+    : signalDirection(article.headlineRuleSignal);
+  const headlineScore = Number.isFinite(article.headlineRuleScore) ? article.headlineRuleScore : 0;
+  const thesisScore = analysis?.thesisImpactScore ?? headlineScore;
+  const materialityBoost =
+    analysis?.materiality === "high" ? 1.25 : analysis?.materiality === "medium" ? 0.7 : 0.25;
+  const confidenceBoost =
+    analysis?.confidence === "high" ? 0.45 : analysis?.confidence === "medium" ? 0.22 : 0.08;
+  const themeBoost = durableThemeHints.length * 0.12;
+  const noisePenalty = likelyNoiseFlags.length * 0.14;
+  const signedBase = Math.abs(thesisScore) * 0.75 + materialityBoost + confidenceBoost + themeBoost;
+  const rawScore = direction === 0 ? 0 : direction * (signedBase - noisePenalty);
+  return roundScore(clamp(rawScore, -5, 5));
+}
+
+function signalDirection(signal: string) {
+  if (signal === "positive") {
+    return 1;
+  }
+  if (signal === "negative") {
+    return -1;
+  }
+  return 0;
+}
+
 function countBy<T>(items: T[], getKey: (item: T) => string | undefined) {
   return items.reduce<Record<string, number>>((counts, item) => {
     const key = getKey(item) || "unknown";
@@ -377,4 +411,12 @@ function pickRecord(value: Record<string, unknown> | undefined, keys: string[]) 
     }
     return picked;
   }, {});
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, Number.isFinite(value) ? value : 0));
+}
+
+function roundScore(value: number) {
+  return Math.round(value * 100) / 100;
 }

@@ -36,7 +36,7 @@ export function ProjectionChart({ data }: { data: ProjectionPoint[] }) {
             <p className="font-semibold">{formatCurrency(activePoint.rebuildValueUsd, "USD")}</p>
           </div>
           <div>
-            <p className="text-xs font-medium uppercase text-muted-foreground">AAPL-only gap</p>
+            <p className="text-xs font-medium uppercase text-muted-foreground">Catch-up gap</p>
             <p className="font-semibold">{formatCurrency(activePoint.gapUsd, "USD")}</p>
           </div>
         </div>
@@ -78,7 +78,7 @@ export function ProjectionChart({ data }: { data: ProjectionPoint[] }) {
                 const labels: Record<string, string> = {
                   hadHeldValueUsd: "Had I Held",
                   rebuildValueUsd: "Rebuild Portfolio",
-                  gapUsd: "AAPL-Only Gap",
+                  gapUsd: "Catch-up Gap",
                 };
                 return [
                   formatCurrency(Number(value || 0), "USD"),

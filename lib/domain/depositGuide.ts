@@ -24,6 +24,7 @@ export type DepositGuideNewsInput = {
   highMaterialityCount?: number;
   escalatedCount?: number;
   analysisMode?: "headlineRules" | "aiArticleAnalysis" | "codexReview";
+  expectedAdjustmentPercent?: number;
 };
 
 export type DepositGuideInput = {
@@ -37,6 +38,7 @@ export type DepositGuideInput = {
   lookbackMonths?: number;
   newsSignal?: DepositGuideNewsSignal;
   news?: DepositGuideNewsInput;
+  expectedAdjustmentPercent?: number;
 };
 
 export type DepositGuideResult = {
@@ -96,7 +98,18 @@ export function calculateDepositGuide(input: DepositGuideInput): DepositGuideRes
   );
   const maxThisMonthAud = roundMoney(planMonthlyContributionAud + baseFlexAud + bankedFlexAud);
   const signalScore = calculateSignalScore(priceSignal, effectiveNewsSignal, news);
-  const adjustmentRatio = calculateAdjustmentRatio(signalScore, confidence);
+  const explicitAdjustmentPercentSource =
+    typeof input.expectedAdjustmentPercent === "number"
+      ? input.expectedAdjustmentPercent
+      : news?.expectedAdjustmentPercent;
+  const explicitAdjustmentPercent =
+    typeof explicitAdjustmentPercentSource === "number"
+      ? clamp(explicitAdjustmentPercentSource, -20, 20)
+      : undefined;
+  const adjustmentRatio =
+    explicitAdjustmentPercent !== undefined
+      ? clamp(explicitAdjustmentPercent / (flexPercent * 100), -1, 1)
+      : calculateAdjustmentRatio(signalScore, confidence);
   const adjustmentAud = calculateAdjustmentAud(adjustmentRatio, baseFlexAud, bankedFlexAud);
   const recommendedDepositAud = clampMoney(
     planMonthlyContributionAud + adjustmentAud,
@@ -119,6 +132,7 @@ export function calculateDepositGuide(input: DepositGuideInput): DepositGuideRes
     news,
     adjustmentPercent,
     signalScore,
+    explicitAdjustmentPercent,
   );
   const sources = buildSources(dailyPrices, contributions, currentPriceUsd, news);
 
@@ -353,14 +367,21 @@ function buildReasons(
   news: DepositGuideNewsInput | undefined,
   adjustmentPercent: number,
   signalScore: number,
+  explicitAdjustmentPercent?: number,
 ) {
   const reasons = buildPriceSignalReasons(signal);
   if (bankedFlexAud > 0) {
     reasons.push(`Unused 20% monthly flexibility bank: A$${bankedFlexAud.toFixed(2)}.`);
   }
-  reasons.push(
-    `Guide adjustment: ${formatSignedPercent(adjustmentPercent)} from the neutral monthly plan inside the guardrail (signal score ${signalScore.toFixed(2)}).`,
-  );
+  if (explicitAdjustmentPercent !== undefined) {
+    reasons.push(
+      `Guide adjustment: ${formatSignedPercent(adjustmentPercent)} from the Codex review tilt (expected ${formatSignedPercent(explicitAdjustmentPercent)}).`,
+    );
+  } else {
+    reasons.push(
+      `Guide adjustment: ${formatSignedPercent(adjustmentPercent)} from the neutral monthly plan inside the guardrail (signal score ${signalScore.toFixed(2)}).`,
+    );
+  }
   if (news && news.articleCount > 0) {
     const newsLabel =
       news.analysisMode === "aiArticleAnalysis"

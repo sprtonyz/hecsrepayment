@@ -1,745 +1,567 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { addMonths, format, parseISO } from "date-fns";
-import { Calculator, ChevronLeft, ChevronRight, Edit2, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ArrowRight, CircleAlert, Edit2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDisplayDate, todayIso } from "@/lib/domain/dates";
 import { formatCurrency, formatShares, roundMoney } from "@/lib/domain/money";
+import type { TrackerBootstrapState } from "@/lib/shared-tracker/bootstrap";
 import { useTrackerData } from "@/lib/storage/useTrackerData";
-import type { Contribution, Currency, Trade, TradeSide } from "@/lib/storage/types";
+import type { Currency, Trade } from "@/lib/storage/types";
 
-type Row =
-  | { kind: "contribution"; date: string; item: Contribution }
-  | { kind: "trade"; date: string; item: Trade };
+const DEFAULT_TICKERS = ["AAPL", "AMZN", "NVDA", "SPCX", "TSLA"] as const;
+const CUSTOM_TICKER_VALUE = "__custom__";
+const DEFAULT_PLAN_START_DATE = "2026-04-01";
+const DEFAULT_BROKERAGE_FEE_USD = "3";
 
-export function TransactionsClient() {
-  const searchParams = useSearchParams();
-  const prefillAppliedRef = useRef(false);
-  const currentStatementMonthKey = todayIso().slice(0, 7);
-  const tracker = useTrackerData();
-  const {
-    snapshot,
-    settings,
-    latestAudToUsdRate,
-    currentPriceUsd,
-    isRefreshing,
-    refreshMarketData,
-  } = tracker;
-  const [contributionDate, setContributionDate] = useState(todayIso());
-  const [contributionAmount, setContributionAmount] = useState(
-    String(settings.planMonthlyContributionAud),
-  );
-  const [contributionCurrency, setContributionCurrency] = useState<Currency>("AUD");
-  const [contributionFx, setContributionFx] = useState(String(latestAudToUsdRate.toFixed(4)));
-  const [contributionNotes, setContributionNotes] = useState("");
-  const [editingContributionId, setEditingContributionId] = useState<string | undefined>();
-  const [recordBuyFromContribution, setRecordBuyFromContribution] = useState(true);
-  const [contributionShareMode, setContributionShareMode] = useState<"currentPrice" | "manual">(
-    "currentPrice",
-  );
-  const [contributionShares, setContributionShares] = useState("");
-  const [contributionBuyPriceUsd, setContributionBuyPriceUsd] = useState(
-    currentPriceUsd > 0 ? String(currentPriceUsd.toFixed(2)) : "",
-  );
-  const [contributionPriceEdited, setContributionPriceEdited] = useState(false);
-  const [contributionBuyFees, setContributionBuyFees] = useState("0");
-  const [contributionBuyFeeCurrency, setContributionBuyFeeCurrency] =
-    useState<Currency>("USD");
-  const [contributionBuyFeeFx, setContributionBuyFeeFx] = useState(
-    String(latestAudToUsdRate.toFixed(4)),
-  );
+type QuoteState = {
+  fetchedPriceUsd?: number;
+  fetchedAt?: string;
+  error?: string;
+};
 
-  const [tradeDate, setTradeDate] = useState(todayIso());
-  const [side, setSide] = useState<TradeSide>("BUY");
+export function TransactionsClient({
+  initialTrackerSnapshot,
+  initialTrackerSyncState,
+  initialDisplayCurrency,
+}: TrackerBootstrapState) {
+  const tracker = useTrackerData({
+    initialSnapshot: initialTrackerSnapshot,
+    initialSyncState: initialTrackerSyncState,
+    initialDisplayCurrency,
+  });
+  const { snapshot, settings, latestAudToUsdRate } = tracker;
+  const baseTicker = (settings.baseTicker || "AAPL").toUpperCase();
+  const [tradeDate, setTradeDate] = useState(() => todayIso());
+  const [tickerChoice, setTickerChoice] = useState<string>(baseTicker);
+  const [customTicker, setCustomTicker] = useState("");
+  const [pricePerShareUsd, setPricePerShareUsd] = useState("");
+  const [priceEdited, setPriceEdited] = useState(false);
   const [shares, setShares] = useState("");
-  const [pricePerShareUsd, setPricePerShareUsd] = useState(
-    currentPriceUsd > 0 ? String(currentPriceUsd.toFixed(2)) : "",
-  );
-  const [tradePriceEdited, setTradePriceEdited] = useState(false);
-  const [fees, setFees] = useState("0");
+  const [stockReceivedUsd, setStockReceivedUsd] = useState("");
+  const [cashOutAud, setCashOutAud] = useState("");
+  const [fees, setFees] = useState(DEFAULT_BROKERAGE_FEE_USD);
   const [feeCurrency, setFeeCurrency] = useState<Currency>("USD");
-  const [feeFx, setFeeFx] = useState(String(latestAudToUsdRate.toFixed(4)));
-  const [createMatchingContribution, setCreateMatchingContribution] = useState(true);
-  const [matchingContributionAud, setMatchingContributionAud] = useState(
-    String(settings.planMonthlyContributionAud),
-  );
-  const [tradeFx, setTradeFx] = useState(String(latestAudToUsdRate.toFixed(4)));
-  const [tradeNotes, setTradeNotes] = useState("");
+  const [notes, setNotes] = useState("");
   const [editingTradeId, setEditingTradeId] = useState<string | undefined>();
-  const [statementMonthKey, setStatementMonthKey] = useState(currentStatementMonthKey);
+  const [quoteRefreshTick, setQuoteRefreshTick] = useState(0);
+  const [quoteState, setQuoteState] = useState<QuoteState>({});
 
-  const rows = useMemo<Row[]>(
-    () =>
-      [
-        ...snapshot.contributions.map((item) => ({
-          kind: "contribution" as const,
-          date: item.date,
-          item,
-        })),
-        ...snapshot.trades.map((item) => ({ kind: "trade" as const, date: item.date, item })),
-      ].sort((a, b) => b.date.localeCompare(a.date)),
-    [snapshot.contributions, snapshot.trades],
-  );
+  const tickerOptions = useMemo(() => {
+    const options = new Set<string>([baseTicker, ...DEFAULT_TICKERS]);
+    for (const trade of snapshot.trades) {
+      if (trade.ticker) {
+        options.add(trade.ticker.toUpperCase());
+      }
+    }
+    for (const saleEvent of snapshot.saleEvents) {
+      if (saleEvent.ticker) {
+        options.add(saleEvent.ticker.toUpperCase());
+      }
+    }
+    return Array.from(options).sort((left, right) => left.localeCompare(right));
+  }, [baseTicker, snapshot.saleEvents, snapshot.trades]);
 
-  const selectedStatementRows = useMemo(
-    () => rows.filter((row) => row.date.slice(0, 7) === statementMonthKey),
-    [rows, statementMonthKey],
-  );
+  const activeTicker = useMemo(() => {
+    if (tickerChoice === CUSTOM_TICKER_VALUE) {
+      return customTicker.trim().toUpperCase();
+    }
+    return (tickerChoice || baseTicker).trim().toUpperCase();
+  }, [baseTicker, customTicker, tickerChoice]);
 
-  const selectedStatementContributionTotalUsd = useMemo(
-    () =>
-      roundMoney(
-        selectedStatementRows.reduce((total, row) => {
-          if (row.kind !== "contribution") {
-            return total;
-          }
-          return total + row.item.amountUsd;
-        }, 0),
-      ),
-    [selectedStatementRows],
-  );
-
-  const selectedStatementLabel = useMemo(
-    () => format(parseISO(`${statementMonthKey}-01`), "MMMM yyyy"),
-    [statementMonthKey],
-  );
+  const [debouncedTicker, setDebouncedTicker] = useState(activeTicker);
 
   useEffect(() => {
-    if (prefillAppliedRef.current || searchParams.get("prefill") !== "month") {
+    const timer = window.setTimeout(() => {
+      setDebouncedTicker(activeTicker);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [activeTicker]);
+
+  useEffect(() => {
+    if (!debouncedTicker) {
       return;
     }
 
-    const amountAud = Number(searchParams.get("amountAud") || settings.planMonthlyContributionAud);
-    const targetAud = Number(searchParams.get("targetAud") || amountAud);
-    const date = searchParams.get("date") || todayIso();
+    let cancelled = false;
 
-    setContributionDate(date);
-    setContributionAmount(String(roundMoney(amountAud)));
-    setContributionCurrency("AUD");
-    setContributionFx(String(latestAudToUsdRate.toFixed(4)));
-    setContributionNotes(`Guided monthly AAPL contribution. Target this month: ${formatCurrency(targetAud, "AUD")}.`);
-    setRecordBuyFromContribution(true);
-    setContributionShareMode("currentPrice");
-    setContributionShares("");
-    setContributionPriceEdited(false);
-    setContributionBuyPriceUsd(currentPriceUsd > 0 ? currentPriceUsd.toFixed(2) : "");
-    setContributionBuyFees("0");
-    setContributionBuyFeeCurrency("USD");
-    setCreateMatchingContribution(true);
-    setMatchingContributionAud(String(roundMoney(amountAud)));
-    setTradeFx(String(latestAudToUsdRate.toFixed(4)));
-    prefillAppliedRef.current = true;
-  }, [currentPriceUsd, latestAudToUsdRate, searchParams, settings.planMonthlyContributionAud]);
+    async function loadQuote() {
+      try {
+        const response = await fetch(
+          `/api/market/quote?symbol=${encodeURIComponent(debouncedTicker)}&provider=${settings.marketDataProvider}`,
+          { cache: "no-store" },
+        );
+        if (!response.ok) {
+          throw new Error(`Quote fetch failed with status ${response.status}.`);
+        }
 
-  async function saveContribution() {
-    if (editingContributionId) {
-      await tracker.deleteContribution(editingContributionId);
+        const data = (await response.json()) as { price?: number; priceUsd?: number };
+        const nextPrice = Number(data.price ?? data.priceUsd ?? 0);
+        if (!cancelled && Number.isFinite(nextPrice) && nextPrice > 0) {
+          setQuoteState({
+            fetchedPriceUsd: nextPrice,
+            fetchedAt: todayIso(),
+            error: undefined,
+          });
+          if (!priceEdited) {
+            setPricePerShareUsd(nextPrice.toFixed(2));
+          }
+          return;
+        }
+
+        throw new Error("No price returned.");
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setQuoteState({
+          fetchedPriceUsd: undefined,
+          fetchedAt: undefined,
+          error: error instanceof Error ? error.message : "Could not fetch quote.",
+        });
+      }
     }
-    const purchaseShares =
-      contributionShareMode === "currentPrice"
-        ? calculatedContributionShares
-        : Number(contributionShares);
-    await tracker.addContributionWithPurchase({
-      contribution: {
-        date: contributionDate,
-        amount: Number(contributionAmount),
-        currencyEntered: contributionCurrency,
-        fxRateToUsd: contributionCurrency === "USD" ? 1 : Number(contributionFx),
-        notes: contributionNotes,
-      },
-      purchase:
-        recordBuyFromContribution && !editingContributionId
-          ? {
-              shares: purchaseShares,
-              pricePerShareUsd: Number(effectiveContributionBuyPriceUsd),
-              fees: Number(contributionBuyFees || 0),
-              feeCurrency: contributionBuyFeeCurrency,
-              feeFxRateToUsd:
-                contributionBuyFeeCurrency === "USD" ? 1 : Number(contributionBuyFeeFx),
-              notes: contributionNotes || "AAPL buy from contribution.",
-            }
-          : undefined,
-    });
-    setEditingContributionId(undefined);
-    setContributionAmount(String(settings.planMonthlyContributionAud));
-    setContributionCurrency("AUD");
-    setContributionNotes("");
-    setContributionShares("");
-    setRecordBuyFromContribution(true);
-    setContributionPriceEdited(false);
-  }
 
-  async function saveTrade() {
-    if (editingTradeId) {
-      await tracker.deleteTrade(editingTradeId);
-    }
-    await tracker.addQuickTrade({
-      date: tradeDate,
-      side,
-      shares: Number(shares),
-      pricePerShareUsd: Number(effectiveTradePriceUsd),
-      fees: Number(fees),
-      feeCurrency,
-      feeFxRateToUsd: feeCurrency === "USD" ? 1 : Number(feeFx),
-      createMatchingContribution: createMatchingContribution && !editingTradeId,
-      contributionAmountAud: Number(matchingContributionAud),
-      audUsdRate: Number(tradeFx),
-      notes: tradeNotes,
-    });
+    void loadQuote();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedTicker, priceEdited, quoteRefreshTick, settings.marketDataProvider]);
+
+  const selectedTradeRows = useMemo(
+    () =>
+      [...snapshot.trades]
+        .sort((left, right) => right.date.localeCompare(left.date))
+        .filter((trade) => trade.side === "BUY" || trade.side === "SELL"),
+    [snapshot.trades],
+  );
+
+  const stockReceivedUsdValue = Number(stockReceivedUsd || 0);
+  const feesUsd =
+    feeCurrency === "USD"
+      ? Number(fees || 0)
+      : roundMoney(Number(fees || 0) * latestAudToUsdRate);
+  const netStockReceivedUsd = Math.max(0, roundMoney(stockReceivedUsdValue - feesUsd));
+  const totalReceivedUsd = roundMoney(
+    selectedTradeRows.reduce((total, trade) => total + trade.grossAmountUsd, 0),
+  );
+  const totalOutgoingAud = roundMoney(
+    selectedTradeRows.reduce(
+      (total, trade) =>
+        total + (trade.cashOutAud ?? (latestAudToUsdRate > 0 ? trade.totalAmountUsd / latestAudToUsdRate : 0)),
+      0,
+    ),
+  );
+
+  function startNewTrade() {
     setEditingTradeId(undefined);
+    setTradeDate(todayIso());
+    setTickerChoice(baseTicker);
+    setCustomTicker(baseTicker);
     setShares("");
-    setFees("0");
-    setTradeNotes("");
-    setTradePriceEdited(false);
-  }
-
-  function editContribution(contribution: Contribution) {
-    setEditingContributionId(contribution.id);
-    setContributionDate(contribution.date);
-    setContributionAmount(String(contribution.amount));
-    setContributionCurrency(contribution.currencyEntered);
-    setContributionFx(String(contribution.fxRateToUsd));
-    setContributionNotes(contribution.notes || "");
-    setRecordBuyFromContribution(false);
-    setContributionPriceEdited(true);
+    setStockReceivedUsd("");
+    setCashOutAud("");
+    setFees(DEFAULT_BROKERAGE_FEE_USD);
+    setFeeCurrency("USD");
+    setNotes("");
+    setPriceEdited(false);
+    setQuoteState({});
+    setQuoteRefreshTick((tick) => tick + 1);
   }
 
   function editTrade(trade: Trade) {
     setEditingTradeId(trade.id);
     setTradeDate(trade.date);
-    setSide(trade.side);
     setShares(String(trade.shares));
     setPricePerShareUsd(String(trade.pricePerShareUsd));
-    setTradePriceEdited(true);
+    setPriceEdited(true);
+    setStockReceivedUsd(String(trade.grossAmountUsd));
+    setCashOutAud(
+      typeof trade.cashOutAud === "number" ? String(trade.cashOutAud) : "",
+    );
     setFees(String(trade.feesUsd));
-    setFeeCurrency(trade.feeCurrency || "USD");
-    setCreateMatchingContribution(false);
-    setTradeNotes(trade.notes || "");
+    setFeeCurrency(trade.feeCurrency || "AUD");
+    setNotes(trade.notes || "");
+    setQuoteState({});
+
+    const upperTicker = trade.ticker.toUpperCase();
+    const knownTicker = tickerOptions.includes(upperTicker) ? upperTicker : CUSTOM_TICKER_VALUE;
+    setTickerChoice(knownTicker);
+    setCustomTicker(upperTicker);
   }
 
-  const latestPriceInput = currentPriceUsd > 0 ? currentPriceUsd.toFixed(2) : "";
-  const effectiveContributionBuyPriceUsd =
-    contributionPriceEdited || editingContributionId
-      ? contributionBuyPriceUsd
-      : latestPriceInput;
-  const effectiveTradePriceUsd =
-    tradePriceEdited || editingTradeId ? pricePerShareUsd : latestPriceInput;
+  async function saveTrade() {
+    if (
+      !activeTicker ||
+      Number(shares) <= 0 ||
+      Number(pricePerShareUsd) <= 0 ||
+      Number(stockReceivedUsd) <= 0 ||
+      Number(cashOutAud) <= 0
+    ) {
+      return;
+    }
 
-  const convertedContributionUsd =
-    contributionCurrency === "USD"
-      ? Number(contributionAmount || 0)
-      : roundMoney(Number(contributionAmount || 0) * Number(contributionFx || 0));
-  const contributionBuyFeeUsd =
-    contributionBuyFeeCurrency === "AUD"
-      ? roundMoney(Number(contributionBuyFees || 0) * Number(contributionBuyFeeFx || 0))
-      : Number(contributionBuyFees || 0);
-  const contributionBuyAvailableUsd = Math.max(
-    0,
-    convertedContributionUsd - contributionBuyFeeUsd,
-  );
-  const calculatedContributionShares =
-    Number(effectiveContributionBuyPriceUsd || 0) > 0
-      ? Number((contributionBuyAvailableUsd / Number(effectiveContributionBuyPriceUsd)).toFixed(6))
-      : 0;
-  const contributionPurchaseShares =
-    contributionShareMode === "currentPrice"
-      ? calculatedContributionShares
-      : Number(contributionShares || 0);
-  const contributionBuyGrossUsd = roundMoney(
-    contributionPurchaseShares * Number(effectiveContributionBuyPriceUsd || 0),
-  );
-  const contributionCashDifferenceUsd = roundMoney(
-    convertedContributionUsd - contributionBuyGrossUsd - contributionBuyFeeUsd,
-  );
-  const matchingUsd = roundMoney(Number(matchingContributionAud || 0) * Number(tradeFx || 0));
-  const tradeGrossUsd = roundMoney(Number(shares || 0) * Number(effectiveTradePriceUsd || 0));
+    if (editingTradeId) {
+      await tracker.deleteTrade(editingTradeId);
+    }
 
-  function shiftStatementMonth(direction: -1 | 1) {
-    setStatementMonthKey((monthKey) => {
-      const nextMonthKey = format(addMonths(parseISO(`${monthKey}-01`), direction), "yyyy-MM");
-      if (direction > 0 && nextMonthKey > currentStatementMonthKey) {
-        return currentStatementMonthKey;
-      }
-      return nextMonthKey;
+    const price = Number(pricePerShareUsd || 0);
+    const qty = Number(shares || 0);
+    const cashOutAudAmount = roundMoney(Number(cashOutAud || 0));
+
+    await tracker.addContributionWithPurchase({
+      contribution: {
+        date: tradeDate,
+        amount: cashOutAudAmount,
+        currencyEntered: "AUD",
+        fxRateToUsd: latestAudToUsdRate,
+        notes,
+      },
+      purchase: {
+        ticker: activeTicker,
+        shares: qty,
+        pricePerShareUsd: price,
+        fees: Number(fees || 0),
+        feeCurrency,
+        feeFxRateToUsd: latestAudToUsdRate,
+        notes,
+      },
     });
-  }
 
-  function resetStatementMonth() {
-    setStatementMonthKey(currentStatementMonthKey);
+    startNewTrade();
   }
 
   return (
     <AppShell
       title="Transactions"
-      subtitle="Log contributions and AAPL buys or sells in a clear ledger view."
+      subtitle="Record stock purchases with the live ticket price and keep the dashboard in sync."
+      initialDisplayCurrency={initialDisplayCurrency}
+      initialTrackerSnapshot={initialTrackerSnapshot}
+      initialTrackerSyncState={initialTrackerSyncState}
     >
-      <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>{editingContributionId ? "Edit Contribution" : "Add Contribution"}</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-4">
-              <Field label="Date">
-                <Input type="date" value={contributionDate} onChange={(event) => setContributionDate(event.target.value)} />
-              </Field>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Amount">
-                  <Input type="number" min="0" step="0.01" value={contributionAmount} onChange={(event) => setContributionAmount(event.target.value)} />
-                </Field>
-                <Field label="Currency">
-                  <Select value={contributionCurrency} onValueChange={(value) => setContributionCurrency(value as Currency)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="AUD">AUD</SelectItem>
-                      <SelectItem value="USD">USD</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
-              <Field label="AUD/USD FX rate used">
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.0001"
-                  value={contributionCurrency === "USD" ? "1" : contributionFx}
-                  disabled={contributionCurrency === "USD"}
-                  onChange={(event) => setContributionFx(event.target.value)}
-                />
-              </Field>
-              <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
-                Converted contribution value: {formatCurrency(convertedContributionUsd, "USD")}
-              </p>
-              <div className="grid gap-3 rounded-md border bg-background p-3">
-                <div className="flex items-start gap-3">
-                  <Checkbox
-                    checked={recordBuyFromContribution}
-                    disabled={Boolean(editingContributionId)}
-                    onCheckedChange={(checked) => setRecordBuyFromContribution(Boolean(checked))}
-                  />
-                  <div className="grid gap-1">
-                    <Label>Also record AAPL buy</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Rebuild Portfolio shares only increase when an AAPL buy is logged.
+          <Card className="overflow-hidden border border-slate-200/70 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-slate-50 shadow-[0_24px_80px_rgba(15,23,42,0.28)]">
+            <CardContent className="px-6 pb-6 pt-8">
+              <div className="flex flex-col gap-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-300/80">
+                      Ledger first
+                    </p>
+                    <h2 className="text-3xl font-semibold tracking-tight text-white">
+                      One purchase form, one clean ledger.
+                    </h2>
+                    <p className="max-w-xl text-sm leading-6 text-slate-300">
+                      Pick a stock ticket, let us fetch the live price, and override anything
+                      you paid differently. Saving here updates the shared tracker and the main
+                      dashboard immediately.
                     </p>
                   </div>
+                  <Badge className="rounded-full bg-white/10 px-3 py-1 text-slate-100" variant="outline">
+                    {snapshot.contributions.length + selectedTradeRows.length} ledger rows
+                  </Badge>
                 </div>
 
-                {recordBuyFromContribution && !editingContributionId ? (
-                  <div className="grid gap-3">
-                    <Field label="Share amount">
-                      <Select
-                        value={contributionShareMode}
-                        onValueChange={(value) =>
-                          setContributionShareMode(value as "currentPrice" | "manual")
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="currentPrice">
-                            Calculate from current price
-                          </SelectItem>
-                          <SelectItem value="manual">Enter shares manually</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field label="AAPL price USD">
-                        <Input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={effectiveContributionBuyPriceUsd}
-                          onChange={(event) => {
-                            setContributionPriceEdited(true);
-                            setContributionBuyPriceUsd(event.target.value);
-                          }}
-                        />
-                        <LatestPriceControls
-                          currentPriceUsd={currentPriceUsd}
-                          isRefreshing={isRefreshing}
-                          onRefresh={() => {
-                            setContributionPriceEdited(false);
-                            void refreshMarketData(true);
-                          }}
-                          onUseLatest={() => {
-                            setContributionPriceEdited(false);
-                            setContributionBuyPriceUsd(
-                              currentPriceUsd > 0 ? currentPriceUsd.toFixed(2) : "",
-                            );
-                          }}
-                        />
-                      </Field>
-                      <Field label="Shares bought">
-                        <Input
-                          type="number"
-                          min="0"
-                          step="0.000001"
-                          value={
-                            contributionShareMode === "currentPrice"
-                              ? String(calculatedContributionShares)
-                              : contributionShares
-                          }
-                          readOnly={contributionShareMode === "currentPrice"}
-                          onChange={(event) => setContributionShares(event.target.value)}
-                        />
-                      </Field>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field label="Brokerage fees">
-                        <Input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={contributionBuyFees}
-                          onChange={(event) => setContributionBuyFees(event.target.value)}
-                        />
-                      </Field>
-                      <Field label="Fee currency">
-                        <Select
-                          value={contributionBuyFeeCurrency}
-                          onValueChange={(value) => setContributionBuyFeeCurrency(value as Currency)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="USD">USD</SelectItem>
-                            <SelectItem value="AUD">AUD</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                    </div>
-                    {contributionBuyFeeCurrency === "AUD" ? (
-                      <Field label="Fee AUD/USD FX rate">
-                        <Input
-                          type="number"
-                          min="0"
-                          step="0.0001"
-                          value={contributionBuyFeeFx}
-                          onChange={(event) => setContributionBuyFeeFx(event.target.value)}
-                        />
-                      </Field>
-                    ) : null}
-                    <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
-                      <Calculator className="mr-2 inline h-4 w-4" />
-                      Buy value: {formatCurrency(contributionBuyGrossUsd, "USD")}.
-                      Cash difference after buy and fees:{" "}
-                      {formatCurrency(contributionCashDifferenceUsd, "USD")}.
-                    </p>
-                  </div>
-                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-white/15 bg-white/5 text-slate-50 hover:bg-white/10 hover:text-white"
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          "Reset the ledger? This clears all transactions but keeps your settings and market data.",
+                        )
+                      ) {
+                        return;
+                      }
+                      void tracker.resetLedger();
+                    }}
+                  >
+                    Reset ledger
+                  </Button>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <MetricPill label="Total ledger" value={String(selectedTradeRows.length)} />
+                  <MetricPill label="Stock received" value={formatCurrency(totalReceivedUsd, "USD")} />
+                  <MetricPill label="Cash out" value={formatCurrency(totalOutgoingAud, "AUD")} />
+                </div>
               </div>
-              <Field label="Notes">
-                <Textarea value={contributionNotes} onChange={(event) => setContributionNotes(event.target.value)} />
-              </Field>
-              <Button
-                onClick={saveContribution}
-                disabled={
-                  Number(contributionAmount) <= 0 ||
-                  (recordBuyFromContribution &&
-                    !editingContributionId &&
-                    (contributionPurchaseShares <= 0 ||
-                      Number(effectiveContributionBuyPriceUsd) <= 0))
-                }
-              >
-                <Plus className="h-4 w-4" />
-                {editingContributionId
-                  ? "Save contribution"
-                  : recordBuyFromContribution
-                    ? "Add contribution and buy"
-                    : "Add contribution"}
-              </Button>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{editingTradeId ? "Edit AAPL Trade" : "Quick-Add Monthly Purchase"}</CardTitle>
+          <Card className="border-border/70 shadow-sm">
+            <CardHeader className="space-y-2">
+              <CardTitle>{editingTradeId ? "Edit stock purchase" : "Add stock purchase"}</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                The stock ticket drives the fetched price. You can still override the price if
+                you bought at a different level.
+              </p>
             </CardHeader>
             <CardContent className="grid gap-4">
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Date">
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="Date of purchase">
                   <Input type="date" value={tradeDate} onChange={(event) => setTradeDate(event.target.value)} />
                 </Field>
-                <Field label="Side">
-                  <Select value={side} onValueChange={(value) => setSide(value as TradeSide)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="BUY">Buy</SelectItem>
-                      <SelectItem value="SELL">Sell</SelectItem>
-                    </SelectContent>
-                  </Select>
+                <Field label="Stock ticket">
+                  <select
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={tickerChoice || baseTicker}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setTickerChoice(value);
+                      setPriceEdited(false);
+                      setQuoteState({});
+                      if (value !== CUSTOM_TICKER_VALUE) {
+                        setCustomTicker(value);
+                      } else {
+                        setCustomTicker("");
+                      }
+                      setPricePerShareUsd("");
+                      setQuoteRefreshTick((tick) => tick + 1);
+                    }}
+                  >
+                    {tickerOptions.map((ticker) => (
+                      <option key={ticker} value={ticker}>
+                        {ticker}
+                      </option>
+                    ))}
+                    <option value={CUSTOM_TICKER_VALUE}>Custom ticker</option>
+                  </select>
                 </Field>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Shares">
-                  <Input type="number" min="0" step="0.000001" value={shares} onChange={(event) => setShares(event.target.value)} />
+
+              {tickerChoice === CUSTOM_TICKER_VALUE ? (
+                <Field label="Custom ticker">
+                  <Input
+                    value={customTicker}
+                    onChange={(event) => {
+                      setCustomTicker(event.target.value.toUpperCase());
+                      setPriceEdited(false);
+                      setQuoteState({});
+                    }}
+                    placeholder="e.g. MSFT"
+                  />
                 </Field>
-                <Field label="AAPL price USD">
+              ) : null}
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field
+                  label="Stock received in USD"
+                  hintTitle="Amount Stake has received"
+                  hintBody="Amount Stake has received."
+                >
                   <Input
                     type="number"
                     min="0"
                     step="0.01"
-                    value={effectiveTradePriceUsd}
+                    value={stockReceivedUsd}
+                    onChange={(event) => setStockReceivedUsd(event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label="Current outgoing AUD"
+                  hintTitle="Amount that came out of aus bank"
+                  hintBody="Amount that came out of aus bank."
+                >
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={cashOutAud}
+                    onChange={(event) => setCashOutAud(event.target.value)}
+                  />
+                </Field>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="Stock price USD">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pricePerShareUsd}
                     onChange={(event) => {
-                      setTradePriceEdited(true);
+                      setPriceEdited(true);
                       setPricePerShareUsd(event.target.value);
                     }}
                   />
-                  <LatestPriceControls
-                    currentPriceUsd={currentPriceUsd}
-                    isRefreshing={isRefreshing}
-                    onRefresh={() => {
-                      setTradePriceEdited(false);
-                      void refreshMarketData(true);
-                    }}
-                    onUseLatest={() => {
-                      setTradePriceEdited(false);
-                      setPricePerShareUsd(
-                        currentPriceUsd > 0 ? currentPriceUsd.toFixed(2) : "",
-                      );
+                  <PriceControls
+                    fetchedPriceUsd={quoteState.fetchedPriceUsd}
+                    fetchedAt={quoteState.fetchedAt}
+                    error={quoteState.error}
+                    onRefresh={() => setQuoteRefreshTick((tick) => tick + 1)}
+                    onUseFetched={() => {
+                      setPriceEdited(false);
+                      if (quoteState.fetchedPriceUsd) {
+                        setPricePerShareUsd(quoteState.fetchedPriceUsd.toFixed(2));
+                      }
                     }}
                   />
                 </Field>
+                <Field label="Stock qty">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.000001"
+                    value={shares}
+                    onChange={(event) => setShares(event.target.value)}
+                  />
+                </Field>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Brokerage fees">
-                  <Input type="number" min="0" step="0.01" value={fees} onChange={(event) => setFees(event.target.value)} />
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="Fees">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={fees}
+                    onChange={(event) => setFees(event.target.value)}
+                  />
                 </Field>
                 <Field label="Fee currency">
-                  <Select value={feeCurrency} onValueChange={(value) => setFeeCurrency(value as Currency)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="USD">USD</SelectItem>
-                      <SelectItem value="AUD">AUD</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <select
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={feeCurrency}
+                    onChange={(event) => setFeeCurrency(event.target.value as Currency)}
+                  >
+                    <option value="AUD">AUD</option>
+                    <option value="USD">USD</option>
+                  </select>
                 </Field>
               </div>
-              {feeCurrency === "AUD" ? (
-                <Field label="Fee AUD/USD FX rate">
-                  <Input type="number" min="0" step="0.0001" value={feeFx} onChange={(event) => setFeeFx(event.target.value)} />
-                </Field>
-              ) : null}
-              <div className="flex items-start gap-3 rounded-md border bg-background p-3">
-                <Checkbox
-                  checked={createMatchingContribution}
-                  disabled={side !== "BUY" || Boolean(editingTradeId)}
-                  onCheckedChange={(checked) => setCreateMatchingContribution(Boolean(checked))}
+
+              <div className="grid gap-3 rounded-2xl border bg-muted/20 p-4">
+                <SummaryStat
+                  label="Net stock received in USD"
+                  value={formatCurrency(netStockReceivedUsd, "USD")}
                 />
-                <div className="grid gap-2">
-                  <Label>
-                    Create matching {formatCurrency(settings.planMonthlyContributionAud, "AUD")} contribution automatically
-                  </Label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={matchingContributionAud}
-                      disabled={!createMatchingContribution || side !== "BUY" || Boolean(editingTradeId)}
-                      onChange={(event) => setMatchingContributionAud(event.target.value)}
-                    />
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.0001"
-                      value={tradeFx}
-                      disabled={!createMatchingContribution || side !== "BUY" || Boolean(editingTradeId)}
-                      onChange={(event) => setTradeFx(event.target.value)}
-                    />
-                  </div>
-                </div>
               </div>
-              <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
-                Buy/sell gross: {formatCurrency(tradeGrossUsd, "USD")}. Matching contribution converts to {formatCurrency(matchingUsd, "USD")}.
-              </p>
+
               <Field label="Notes">
-                <Textarea value={tradeNotes} onChange={(event) => setTradeNotes(event.target.value)} />
+                <Textarea
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  placeholder="Optional context for the purchase"
+                />
               </Field>
-              <Button onClick={saveTrade} disabled={Number(shares) <= 0 || Number(effectiveTradePriceUsd) <= 0}>
-                <Plus className="h-4 w-4" />
-                {editingTradeId ? "Save trade" : "Log trade"}
-              </Button>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  onClick={() => void saveTrade()}
+                  disabled={
+                    !activeTicker ||
+                    Number(shares) <= 0 ||
+                    Number(pricePerShareUsd) <= 0 ||
+                    Number(stockReceivedUsd) <= 0 ||
+                    Number(cashOutAud) <= 0
+                  }
+                >
+                  <Plus className="h-4 w-4" />
+                  {editingTradeId ? "Save purchase" : "Add purchase"}
+                </Button>
+                {editingTradeId ? (
+                  <Button type="button" variant="ghost" onClick={startNewTrade}>
+                    Cancel edit
+                  </Button>
+                ) : null}
+              </div>
             </CardContent>
           </Card>
         </div>
 
         <div className="space-y-6">
-          <Card>
-            <CardHeader className="space-y-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div className="space-y-1">
-                  <CardTitle>Statement cycle</CardTitle>
-                  <p className="text-sm text-muted-foreground">
-                    Browse past statement months without changing any entries.
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    aria-label="Previous statement month"
-                    size="icon"
-                    variant="outline"
-                    onClick={() => shiftStatementMonth(-1)}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <div className="min-w-[180px] rounded-md border bg-background px-3 py-2 text-center">
-                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                      Viewing
-                    </p>
-                    <p className="text-sm font-medium">{selectedStatementLabel}</p>
-                  </div>
-                  <Button
-                    aria-label="Next statement month"
-                    size="icon"
-                    variant="outline"
-                    disabled={statementMonthKey >= currentStatementMonthKey}
-                    onClick={() => shiftStatementMonth(1)}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    className="shrink-0"
-                    size="sm"
-                    variant="ghost"
-                    onClick={resetStatementMonth}
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                    Reset
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-                <div className="rounded-lg border bg-muted/30 p-4">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Statement total
-                  </p>
-                  <p className="mt-2 text-3xl font-semibold">
-                    {formatCurrency(selectedStatementContributionTotalUsd, "USD")}
-                  </p>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Contributions logged in {selectedStatementLabel}. This is view-only and does
-                    not change assignments.
-                  </p>
-                </div>
-                <div className="grid gap-2 rounded-lg border bg-background p-4 text-sm text-muted-foreground">
-                  <p>
-                    {selectedStatementRows.length} ledger item
-                    {selectedStatementRows.length === 1 ? "" : "s"} in this cycle.
-                  </p>
-                  <p>Use the arrows to inspect the previous statement total, then reset to current.</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
+          <Card className="border-border/70 shadow-sm">
             <CardHeader>
-              <CardTitle>Transaction ledger</CardTitle>
+              <CardTitle>Purchase ledger</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Every saved row updates IndexedDB and the shared tracker snapshot, so the main
+                dashboard sees the same data.
+              </p>
             </CardHeader>
             <CardContent>
-            {rows.length === 0 ? (
-              <div className="rounded-md border bg-muted p-6 text-sm text-muted-foreground">
-                No contributions or trades yet.
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Shares</TableHead>
-                    <TableHead>Price</TableHead>
-                    <TableHead>Total</TableHead>
-                    <TableHead>Fees</TableHead>
-                    <TableHead>Currency</TableHead>
-                    <TableHead>Notes</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.map((row) => {
-                    const isContribution = row.kind === "contribution";
-                    const item = row.item;
-                    return (
-                      <TableRow key={`${row.kind}-${item.id}`}>
-                        <TableCell>{formatDisplayDate(row.date)}</TableCell>
-                        <TableCell>{isContribution ? "Contribution" : (item as Trade).side}</TableCell>
-                        <TableCell>{isContribution ? "-" : formatShares((item as Trade).shares)}</TableCell>
+              {selectedTradeRows.length === 0 ? (
+                <EmptyState />
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Ticket</TableHead>
+                      <TableHead>Qty</TableHead>
+                      <TableHead>Price USD</TableHead>
+                      <TableHead>Received USD</TableHead>
+                      <TableHead>Fees</TableHead>
+                      <TableHead>Outgoing AUD</TableHead>
+                      <TableHead>Notes</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedTradeRows.map((trade) => (
+                      <TableRow key={trade.id}>
+                        <TableCell>{formatDisplayDate(trade.date)}</TableCell>
+                        <TableCell className="font-medium">{trade.ticker}</TableCell>
+                        <TableCell>{formatShares(trade.shares)}</TableCell>
+                        <TableCell>{formatCurrency(trade.pricePerShareUsd, "USD")}</TableCell>
+                        <TableCell>{formatCurrency(trade.grossAmountUsd, "USD")}</TableCell>
+                        <TableCell>{formatCurrency(trade.feesUsd, "USD")}</TableCell>
                         <TableCell>
-                          {isContribution ? "-" : formatCurrency((item as Trade).pricePerShareUsd, "USD")}
+                          {latestAudToUsdRate > 0
+                            ? formatCurrency(roundMoney(trade.totalAmountUsd / latestAudToUsdRate), "AUD")
+                            : "-"}
                         </TableCell>
-                        <TableCell>
-                          {isContribution
-                            ? formatCurrency((item as Contribution).amountUsd, "USD")
-                            : formatCurrency((item as Trade).totalAmountUsd, "USD")}
-                        </TableCell>
-                        <TableCell>
-                          {isContribution ? "-" : formatCurrency((item as Trade).feesUsd, "USD")}
-                        </TableCell>
-                        <TableCell>{isContribution ? (item as Contribution).currencyEntered : "USD"}</TableCell>
-                        <TableCell className="max-w-48 truncate">{item.notes || "-"}</TableCell>
+                        <TableCell className="max-w-56 truncate">{trade.notes || "-"}</TableCell>
                         <TableCell>
                           <div className="flex justify-end gap-1">
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              onClick={() =>
-                                isContribution
-                                  ? editContribution(item as Contribution)
-                                  : editTrade(item as Trade)
-                              }
-                            >
+                            <Button size="icon" variant="ghost" onClick={() => editTrade(trade)}>
                               <Edit2 className="h-4 w-4" />
                             </Button>
                             <Button
                               size="icon"
                               variant="ghost"
-                              onClick={() =>
-                                isContribution
-                                  ? tracker.deleteContribution(item.id)
-                                  : tracker.deleteTrade(item.id)
-                              }
+                              onClick={() => void tracker.deleteTrade(trade.id)}
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
                         </TableCell>
                       </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            )}
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/70 shadow-sm">
+            <CardHeader className="space-y-2">
+              <CardTitle>Roll-up</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Quick totals for the saved transaction list.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <SummaryStat label="Saved trades" value={String(selectedTradeRows.length)} />
+                <SummaryStat label="Stock received" value={formatCurrency(totalReceivedUsd, "USD")} />
+              </div>
+              <p className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+                <ArrowRight className="h-4 w-4" />
+                Change the ticket, price, or qty and the dashboard will pick it up on the next
+                render.
+              </p>
             </CardContent>
           </Card>
         </div>
@@ -748,40 +570,129 @@ export function TransactionsClient() {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+  hintTitle,
+  hintBody,
+}: {
+  label: string;
+  children: ReactNode;
+  hintTitle?: string;
+  hintBody?: string;
+}) {
   return (
     <div className="grid gap-2">
-      <Label>{label}</Label>
+      <div className="flex items-center gap-2">
+        <Label>{label}</Label>
+        {hintTitle && hintBody ? <HintTip title={hintTitle} body={hintBody} /> : null}
+      </div>
       {children}
     </div>
   );
 }
 
-function LatestPriceControls({
-  currentPriceUsd,
-  isRefreshing,
+function HintTip({ title, body }: { title: string; body: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onPointerDown(event: PointerEvent) {
+      if (!ref.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative inline-flex">
+      <button
+        type="button"
+        aria-label={`Hint: ${title}`}
+        aria-expanded={open}
+        className="rounded-sm text-amber-500 hover:text-amber-400 focus:outline-none focus:ring-2 focus:ring-ring"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <CircleAlert className="h-4 w-4" />
+      </button>
+      {open ? (
+        <div className="absolute right-0 top-6 z-50 w-72 rounded-lg border bg-popover p-3 text-sm text-popover-foreground shadow-lg">
+          <p className="font-medium">{title}</p>
+          <div className="mt-1 text-muted-foreground">
+            <p>{body}</p>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PriceControls({
+  fetchedPriceUsd,
+  fetchedAt,
+  error,
   onRefresh,
-  onUseLatest,
+  onUseFetched,
 }: {
-  currentPriceUsd: number;
-  isRefreshing: boolean;
+  fetchedPriceUsd?: number;
+  fetchedAt?: string;
+  error?: string;
   onRefresh: () => void;
-  onUseLatest: () => void;
+  onUseFetched: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
       <span>
-        Latest tracker price:{" "}
-        {currentPriceUsd > 0 ? formatCurrency(currentPriceUsd, "USD") : "not loaded"}
+        {fetchedPriceUsd
+          ? `Fetched price: ${formatCurrency(fetchedPriceUsd, "USD")}`
+          : error || "No fetched price yet."}
+        {fetchedAt ? ` | ${formatDisplayDate(fetchedAt)}` : ""}
       </span>
-      <div className="flex gap-2">
-        <Button type="button" size="sm" variant="ghost" onClick={onUseLatest}>
-          Use latest
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" size="sm" variant="ghost" onClick={onUseFetched} disabled={!fetchedPriceUsd}>
+          Use fetched
         </Button>
-        <Button type="button" size="sm" variant="outline" onClick={onRefresh} disabled={isRefreshing}>
-          {isRefreshing ? "Refreshing..." : "Refresh"}
+        <Button type="button" size="sm" variant="outline" onClick={onRefresh}>
+          <RefreshCw className="h-3.5 w-3.5" />
+          Refresh
         </Button>
       </div>
+    </div>
+  );
+}
+
+function SummaryStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border bg-background p-4">
+      <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-2 text-lg font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function MetricPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-slate-50 shadow-[0_10px_30px_rgba(15,23,42,0.18)]">
+      <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-300/70">
+        {label}
+      </p>
+      <p className="mt-2 text-2xl font-semibold leading-none tracking-tight tabular-nums">{value}</p>
+    </div>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="rounded-2xl border border-dashed bg-muted/20 p-8 text-center">
+      <p className="text-sm font-medium">No purchases yet</p>
+      <p className="mt-2 text-sm text-muted-foreground">
+        Add your first stock purchase on the left and it will appear here.
+      </p>
     </div>
   );
 }

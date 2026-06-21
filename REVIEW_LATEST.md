@@ -114,13 +114,15 @@ The bundle needs a top-level `codexReview` object shaped for the app:
 
 ## Scoring Guidance
 
-Use the score as a compact signal for the deposit guide, not as a price target:
+Use the score as a compact signal for the deposit guide, not as a price target. Treat it as a continuous slider, not a count of buckets:
 
-- `+2.0` to `+3.0`: strong positive thesis evidence from multiple credible, material items.
-- `+0.5` to `+1.5`: modest positive tilt.
-- `-0.5` to `-1.5`: modest negative tilt.
-- `-2.0` to `-3.0`: strong negative thesis evidence from multiple credible, material items.
-- Around `0`: genuinely balanced material evidence or insufficient material evidence.
+- `+2.0` to `+3.0`: strong positive thesis evidence from multiple credible, material items with broad confirmation.
+- `+0.5` to `+1.5`: modest positive tilt, usually a mix of one stronger item and several weaker supporting items.
+- `-0.5` to `-1.5`: modest negative tilt, usually a mix of one stronger item and several weaker supporting items.
+- `-2.0` to `-3.0`: strong negative thesis evidence from multiple credible, material items with broad confirmation.
+- Around `0`: genuinely balanced material evidence, mixed evidence, or insufficient evidence.
+
+Within each bucket, prefer decimals rather than integers. A `positive` review can still be a `+0.6` if the evidence is real but not broad, or a `+2.4` if it is durable and well supported. Do not flatten all positives, neutrals, or negatives to the same score.
 
 Set `confidence` by evidence quality:
 

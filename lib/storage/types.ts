@@ -66,6 +66,7 @@ export type SaleEvent = {
 
 export type Contribution = {
   id: string;
+  ledgerGroupId?: string;
   date: string;
   amount: number;
   currencyEntered: Currency;
@@ -80,6 +81,7 @@ export type TradeSide = "BUY" | "SELL";
 
 export type Trade = {
   id: string;
+  ledgerGroupId?: string;
   date: string;
   ticker: Ticker;
   side: TradeSide;
@@ -92,6 +94,7 @@ export type Trade = {
   feesUsd: number;
   feeCurrency?: Currency;
   totalAmountUsd: number;
+  cashOutAud?: number;
   notes?: string;
   createdAt: string;
   updatedAt: string;

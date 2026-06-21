@@ -78,6 +78,33 @@ describe("monthly deposit guide", () => {
     expect(withNews.sources.some((source) => source.includes("Headline checked"))).toBe(true);
   });
 
+  it("uses an explicit Codex review tilt when present", () => {
+    const result = calculateDepositGuide({
+      planMonthlyContributionAud: 600,
+      contributions: [],
+      dailyPrices: prices([210, 210, 210, 210]),
+      currentPriceUsd: 210,
+      latestUsdToAudRate: 1.5,
+      asOfDate: "2026-05-20",
+      news: {
+        signal: "positive",
+        confidence: "high",
+        articleCount: 9,
+        providerCount: 4,
+        providers: ["appleNewsroom", "googleNews", "yahooFinance"],
+        score: 2.5,
+        expectedAdjustmentPercent: 15,
+        analysisMode: "codexReview",
+      },
+    });
+
+    expect(result.adjustmentPercent).toBe(15);
+    expect(result.recommendedDepositAud).toBe(690);
+    expect(
+      result.reasons.some((reason) => reason.includes("Codex review tilt")),
+    ).toBe(true);
+  });
+
   it("uses Codex-reviewed monthly news without treating raw headline volume as stronger signal", () => {
     const result = calculateDepositGuide({
       planMonthlyContributionAud: 600,

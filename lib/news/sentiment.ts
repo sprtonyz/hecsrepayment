@@ -31,6 +31,11 @@ const NEGATIVE_RULES: TermRule[] = [
 
 const NEWS_LOOKBACK_DAYS = 30;
 const MAX_DIGEST_ARTICLES = 40;
+const DIRECTNESS_BOOST_RULES: TermRule[] = [
+  { label: "direct disclosure", pattern: /\b(announces?|reports?|files?|launches?|approves?|wins?|closes?|secures?)\b/i, weight: 0.18 },
+  { label: "confirmed action", pattern: /\b(beat(s|ing)?|raises?|cuts?|guidance|outlook|forecast|target)\b/i, weight: 0.12 },
+  { label: "hedged language", pattern: /\b(could|may|might|might be|reportedly|rumored|expected|potential|possible|appears|suggests?|seems|allegedly|apparently)\b/i, weight: -0.16 },
+];
 
 export function scoreNewsText(title: string, summary = "") {
   const text = `${title} ${summary}`.replace(/\s+/g, " ").trim();
@@ -44,7 +49,10 @@ export function scoreNewsText(title: string, summary = "") {
     }
   }
 
-  const roundedScore = roundScore(score);
+  const direction = score > 0 ? 1 : score < 0 ? -1 : 0;
+  const directnessAdjustment = buildDirectnessAdjustment(text, direction);
+  const breadthAdjustment = direction * Math.min(0.45, matchedTerms.length * 0.06);
+  const roundedScore = roundScore(score + directnessAdjustment + breadthAdjustment);
   return {
     signalScore: roundedScore,
     signal: signalFromScore(roundedScore),
@@ -178,6 +186,21 @@ function signalFromScore(score: number): NewsSignal {
     return "negative";
   }
   return "neutral";
+}
+
+function buildDirectnessAdjustment(text: string, direction: number) {
+  if (direction === 0) {
+    return 0;
+  }
+
+  let adjustment = 0;
+  for (const rule of DIRECTNESS_BOOST_RULES) {
+    if (rule.pattern.test(text)) {
+      adjustment += rule.weight;
+    }
+  }
+
+  return roundScore(adjustment * direction);
 }
 
 function roundScore(value: number) {

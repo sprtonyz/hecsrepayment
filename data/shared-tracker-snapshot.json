@@ -2,14 +2,14 @@
   "snapshot": {
     "settings": {
       "id": "singleton",
-      "createdAt": "2026-06-14T09:46:58.931Z",
+      "createdAt": "2026-06-20T02:28:36.479Z",
       "planYears": 5,
-      "updatedAt": "2026-06-14T10:17:53.555Z",
+      "updatedAt": "2026-06-20T13:25:00.000Z",
       "baseTicker": "AAPL",
       "dividendMode": "cash",
       "includeSplits": true,
-      "planStartDate": "2026-06-14",
-      "displayCurrency": "AUD",
+      "planStartDate": "2026-05-01",
+      "displayCurrency": "USD",
       "defaultPriceMode": "live",
       "includeDividends": true,
       "studyLoanEnabled": true,
@@ -30,21 +30,87 @@
     },
     "saleEvents": [
       {
-        "id": "sale-215d1fa2-39d0-4379-9424-ba1728a8ebad",
+        "id": "sale-319a2547-9a3e-40da-86b5-0b00a82c512d",
         "notes": "",
         "ticker": "AAPL",
         "feesUsd": 0,
-        "saleDate": "2026-06-14",
-        "createdAt": "2026-06-14T09:46:58.931Z",
-        "updatedAt": "2026-06-14T09:46:58.931Z",
-        "sharesSold": 77,
-        "netProceedsUsd": 22959.11,
-        "grossProceedsUsd": 22959.11,
-        "salePricePerShareUsd": 298.1703
+        "saleDate": "2026-05-19",
+        "createdAt": "2026-06-20T02:28:36.479Z",
+        "updatedAt": "2026-06-20T02:28:36.479Z",
+        "sharesSold": 73,
+        "netProceedsUsd": 21765.68,
+        "grossProceedsUsd": 21765.68,
+        "salePricePerShareUsd": 298.16
       }
     ],
-    "contributions": [],
-    "trades": []
+    "contributions": [
+      {
+        "id": "contribution-a4db0a8a-5095-4103-a0a4-804e5c037edd",
+        "date": "2026-05-01",
+        "notes": "Spacex IPO opening",
+        "amount": 500,
+        "amountUsd": 328.95,
+        "createdAt": "2026-06-20T02:32:22.425Z",
+        "updatedAt": "2026-06-20T13:25:00.000Z",
+        "fxRateToUsd": 0.6578947368421053,
+        "ledgerGroupId": "ledger-abcb6dbd-e25b-4fe5-84f3-5498bd410a0f",
+        "currencyEntered": "AUD"
+      },
+      {
+        "id": "contribution-d740815f-18bd-4195-9a21-25c5abda7582",
+        "date": "2026-05-01",
+        "notes": "",
+        "amount": 600,
+        "amountUsd": 394.74,
+        "createdAt": "2026-06-20T02:34:00.525Z",
+        "updatedAt": "2026-06-20T13:25:00.000Z",
+        "fxRateToUsd": 0.6578947368421053,
+        "ledgerGroupId": "ledger-c1611384-1dd5-4394-ad6a-6a83d6745e5f",
+        "currencyEntered": "AUD"
+      }
+    ],
+    "trades": [
+      {
+        "id": "trade-1944a244-3d43-4197-b831-c8fa6cf21492",
+        "date": "2026-05-01",
+        "side": "BUY",
+        "notes": "",
+        "shares": 2.4,
+        "ticker": "SPCX",
+        "feesUsd": 3,
+        "createdAt": "2026-06-20T02:34:00.525Z",
+        "updatedAt": "2026-06-20T13:25:00.000Z",
+        "cashOutAud": 600,
+        "feeCurrency": "USD",
+        "fxRateToUsd": 1,
+        "ledgerGroupId": "ledger-c1611384-1dd5-4394-ad6a-6a83d6745e5f",
+        "pricePerShare": 171.99,
+        "grossAmountUsd": 412.78,
+        "totalAmountUsd": 415.78,
+        "currencyEntered": "USD",
+        "pricePerShareUsd": 171.99
+      },
+      {
+        "id": "trade-8c2856f3-e51e-463d-82a9-921b2f332b19",
+        "date": "2026-05-01",
+        "side": "BUY",
+        "notes": "Spacex IPO opening",
+        "shares": 2.062,
+        "ticker": "SPCX",
+        "feesUsd": 3,
+        "createdAt": "2026-06-20T02:32:22.425Z",
+        "updatedAt": "2026-06-20T13:25:00.000Z",
+        "cashOutAud": 500,
+        "feeCurrency": "USD",
+        "fxRateToUsd": 1,
+        "ledgerGroupId": "ledger-abcb6dbd-e25b-4fe5-84f3-5498bd410a0f",
+        "pricePerShare": 171.99,
+        "grossAmountUsd": 354.64,
+        "totalAmountUsd": 357.64,
+        "currencyEntered": "USD",
+        "pricePerShareUsd": 171.99
+      }
+    ]
   },
-  "updatedAt": "2026-06-16T14:36:56.727Z"
+  "updatedAt": "2026-06-21T02:37:02.737Z"
 }

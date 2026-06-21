@@ -20,21 +20,50 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency, roundMoney } from "@/lib/domain/money";
+import type { TrackerBootstrapState } from "@/lib/shared-tracker/bootstrap";
 import { useTrackerData } from "@/lib/storage/useTrackerData";
 import type { Currency, DividendMode, MarketProviderName, PriceMode } from "@/lib/storage/types";
 
-export function SettingsClient() {
-  const tracker = useTrackerData();
+export function SettingsClient({
+  initialTrackerSnapshot,
+  initialTrackerSyncState,
+  initialDisplayCurrency,
+}: TrackerBootstrapState) {
+  const tracker = useTrackerData({
+    initialSnapshot: initialTrackerSnapshot,
+    initialSyncState: initialTrackerSyncState,
+    initialDisplayCurrency,
+  });
   const key = `${tracker.settings.updatedAt}-${tracker.saleEvent?.updatedAt || "no-sale"}`;
-  return <SettingsForm key={key} tracker={tracker} />;
+  return (
+    <SettingsForm
+      key={key}
+      tracker={tracker}
+      initialDisplayCurrency={initialDisplayCurrency}
+      initialTrackerSnapshot={initialTrackerSnapshot}
+      initialTrackerSyncState={initialTrackerSyncState}
+    />
+  );
 }
 
-function SettingsForm({ tracker }: { tracker: ReturnType<typeof useTrackerData> }) {
+const DEFAULT_PLAN_START_DATE = "2026-04-01";
+
+function SettingsForm({
+  tracker,
+  initialTrackerSnapshot,
+  initialTrackerSyncState,
+  initialDisplayCurrency,
+}: {
+  tracker: ReturnType<typeof useTrackerData>;
+  initialTrackerSnapshot?: TrackerBootstrapState["initialTrackerSnapshot"];
+  initialTrackerSyncState?: TrackerBootstrapState["initialTrackerSyncState"];
+  initialDisplayCurrency?: TrackerBootstrapState["initialDisplayCurrency"];
+}) {
   const { settings, saleEvent } = tracker;
   const importRef = useRef<HTMLInputElement>(null);
   const [displayCurrency, setDisplayCurrency] = useState<Currency>(settings.displayCurrency);
   const [planMonthlyContributionAud, setPlanMonthlyContributionAud] = useState(String(settings.planMonthlyContributionAud));
-  const [planStartDate, setPlanStartDate] = useState(settings.planStartDate);
+  const [planStartDate, setPlanStartDate] = useState(settings.planStartDate || DEFAULT_PLAN_START_DATE);
   const [planYears, setPlanYears] = useState(String(settings.planYears));
   const [includeDividends, setIncludeDividends] = useState(settings.includeDividends);
   const [dividendMode, setDividendMode] = useState<DividendMode>(settings.dividendMode);
@@ -142,6 +171,9 @@ function SettingsForm({ tracker }: { tracker: ReturnType<typeof useTrackerData> 
     <AppShell
       title="Settings"
       subtitle="Manage the AAPL benchmark, AUD plan, provider preferences, and local backup data."
+      initialDisplayCurrency={initialDisplayCurrency}
+      initialTrackerSnapshot={initialTrackerSnapshot}
+      initialTrackerSyncState={initialTrackerSyncState}
     >
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>

@@ -146,7 +146,7 @@ const COMPANY_PROFILE_REGISTRY: Record<string, Omit<CompanyReviewProfile, "symbo
     ],
     materialityKeywords: ["ev", "energy storage", "autonomy", "fsd", "pricing", "margin", "deliveries"],
   },
-  SPACEX: {
+  SPCX: {
     companyName: "SpaceX",
     sector: "Space launch, satellites, and aerospace infrastructure",
     thesisDrivers: [

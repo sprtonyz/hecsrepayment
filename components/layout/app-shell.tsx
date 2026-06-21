@@ -1,70 +1,75 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import {
-  BarChart3,
-  ClipboardList,
-  Home,
-  LineChart,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Settings,
-  WalletCards,
-} from "lucide-react";
+import { useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { Toaster } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { indexedDbAdapter } from "@/lib/storage/indexedDb";
 import { useTrackerData } from "@/lib/storage/useTrackerData";
 import { cn } from "@/lib/utils";
 import type { Currency } from "@/lib/storage/types";
 
-const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: Home },
-  { href: "/setup", label: "Setup", icon: ClipboardList },
-  { href: "/transactions", label: "Transactions", icon: WalletCards },
-  { href: "/projections", label: "Projections", icon: LineChart },
-  { href: "/settings", label: "Settings", icon: Settings },
-];
+type TrackerDataOptions = NonNullable<Parameters<typeof useTrackerData>[0]>;
 
 export function AppShell({
   children,
   title,
   subtitle,
+  initialTrackerSnapshot,
+  initialTrackerSyncState,
+  initialDisplayCurrency,
 }: {
   children: React.ReactNode;
   title: string;
   subtitle?: string;
+  initialTrackerSnapshot?: TrackerDataOptions["initialSnapshot"];
+  initialTrackerSyncState?: TrackerDataOptions["initialSyncState"];
+  initialDisplayCurrency?: TrackerDataOptions["initialDisplayCurrency"];
 }) {
-  const pathname = usePathname();
-  const { settings, saveSettings, syncState } = useTrackerData();
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
-    if (typeof window === "undefined") {
-      return false;
-    }
-    try {
-      return window.localStorage.getItem("aapl-shell-sidebar") === "collapsed";
-    } catch {
-      return false;
-    }
+  const { settings, saveSettings, syncState } = useTrackerData({
+    initialSnapshot: initialTrackerSnapshot,
+    initialSyncState: initialTrackerSyncState,
+    initialDisplayCurrency,
   });
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        "aapl-shell-sidebar",
-        isSidebarCollapsed ? "collapsed" : "expanded",
-      );
-    } catch {
-      // Ignore storage errors so the shell stays usable.
-    }
-  }, [isSidebarCollapsed]);
+  const [isDebugMenuOpen, setIsDebugMenuOpen] = useState(false);
 
   async function setDisplayCurrency(currency: Currency) {
     if (settings.displayCurrency !== currency) {
       await saveSettings({ displayCurrency: currency });
     }
+  }
+
+  function forceHardRefresh() {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.location.reload();
+  }
+
+  async function resetSiteState() {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      await indexedDbAdapter.reset();
+    } catch {
+      // If IndexedDB reset fails, still clear the rest of the site state.
+    }
+
+    try {
+      window.localStorage.removeItem("aapl-shell-sidebar");
+      window.localStorage.removeItem("aaplCatchUpTracker:coreSnapshot");
+      window.localStorage.removeItem("aaplCatchUpTracker:displayCurrency");
+      window.localStorage.removeItem("aaplCatchUpTracker:sitePinUnlocked");
+      document.cookie = "aaplCatchUpTracker:displayCurrency=; path=/; max-age=0; samesite=lax";
+    } catch {
+      // Best effort only.
+    }
+
+    window.location.reload();
   }
 
   return (
@@ -74,125 +79,12 @@ export function AppShell({
         <div className="absolute right-[-10rem] top-28 h-80 w-80 rounded-full bg-emerald-500/10 blur-3xl" />
         <div className="absolute bottom-[-8rem] left-[-12rem] h-[24rem] w-[24rem] rounded-full bg-amber-400/10 blur-3xl" />
       </div>
-      <Toaster richColors position="top-right" />
+      <Toaster richColors position="top-right" duration={1000} />
       <div
         className={cn(
-          "relative z-10 mx-auto grid min-h-screen max-w-[1680px] gap-5 px-4 py-4 sm:px-6 lg:grid-cols-[18rem_minmax(0,1fr)] lg:px-6 xl:px-8",
-          isSidebarCollapsed && "lg:grid-cols-[5.5rem_minmax(0,1fr)]",
+          "relative z-10 mx-auto flex min-h-screen w-full max-w-[1680px] flex-col gap-5 px-4 py-4 sm:px-6 lg:px-6 xl:px-8",
         )}
       >
-        <aside
-          className={cn(
-            "rounded-[2rem] border border-slate-800/80 bg-[#0f1830] p-4 text-slate-100 shadow-[0_30px_100px_rgba(15,23,42,0.35)] lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:self-start",
-            isSidebarCollapsed && "lg:p-3",
-          )}
-        >
-          <div className="flex items-start gap-3 border-b border-white/8 pb-4">
-            <Link
-              href="/dashboard"
-              className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#3b6df6] text-white shadow-[0_14px_28px_rgba(59,109,246,0.35)]"
-            >
-              <BarChart3 className="h-5 w-5" />
-            </Link>
-            <div className={cn("min-w-0 flex-1", isSidebarCollapsed && "lg:hidden")}>
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-lg font-semibold leading-tight text-white">Rebuild Hub</p>
-                {settings.isDemoMode ? <Badge variant="warning">Demo</Badge> : null}
-              </div>
-              <p className="mt-1 text-sm text-slate-400">Version 2 shell</p>
-            </div>
-            <Button
-              aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className="ml-auto inline-flex rounded-full bg-white/5 text-white hover:bg-white/10"
-              onClick={() => setIsSidebarCollapsed((current) => !current)}
-              size="icon"
-              variant="ghost"
-            >
-              {isSidebarCollapsed ? (
-                <PanelLeftOpen className="h-4 w-4" />
-              ) : (
-                <PanelLeftClose className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
-
-          <div className="mt-4 grid gap-3">
-            <div className={cn("rounded-[1.5rem] border border-white/8 bg-white/4 p-4", isSidebarCollapsed && "lg:hidden")}>
-              <p className="text-xs font-medium uppercase tracking-[0.28em] text-slate-500">
-                Currency
-              </p>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <Button
-                  size="sm"
-                  variant={settings.displayCurrency === "USD" ? "default" : "ghost"}
-                  className={cn(
-                    "w-full",
-                    settings.displayCurrency !== "USD" && "text-slate-200 hover:bg-white/10",
-                  )}
-                  onClick={() => setDisplayCurrency("USD")}
-                >
-                  USD
-                </Button>
-                <Button
-                  size="sm"
-                  variant={settings.displayCurrency === "AUD" ? "default" : "ghost"}
-                  className={cn(
-                    "w-full",
-                    settings.displayCurrency !== "AUD" && "text-slate-200 hover:bg-white/10",
-                  )}
-                  onClick={() => setDisplayCurrency("AUD")}
-                >
-                  AUD
-                </Button>
-              </div>
-            </div>
-
-            <nav className="grid gap-2">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const active = pathname === item.href;
-                return (
-                  <Button
-                    key={item.href}
-                    asChild
-                    variant={active ? "default" : "ghost"}
-                    className={cn(
-                      "h-12 justify-start rounded-2xl text-sm",
-                      isSidebarCollapsed ? "lg:justify-center lg:px-0" : "px-4",
-                      active
-                        ? "bg-[#3b6df6] text-white shadow-[0_14px_24px_rgba(59,109,246,0.32)]"
-                        : "bg-transparent text-slate-300 hover:bg-white/8 hover:text-white",
-                    )}
-                  >
-                    <Link href={item.href}>
-                      <Icon className="h-4 w-4" />
-                      <span className={cn(isSidebarCollapsed && "lg:hidden")}>{item.label}</span>
-                    </Link>
-                  </Button>
-                );
-              })}
-            </nav>
-          </div>
-
-          <div className={cn("mt-6 rounded-[1.75rem] border border-white/8 bg-white/5 p-4", isSidebarCollapsed && "lg:hidden")}>
-            <p className="text-xs font-medium uppercase tracking-[0.28em] text-slate-500">Today&apos;s focus</p>
-            <p className="mt-3 text-sm leading-6 text-slate-200">
-              A quick glance should answer the question before the user has to dig.
-            </p>
-            <div className="mt-4 grid gap-2">
-              <Button size="sm" className="bg-emerald-400 text-slate-950 hover:bg-emerald-300">
-                Log today
-              </Button>
-              <Button size="sm" variant="outline" className="border-white/10 bg-white/5 text-white hover:bg-white/10">
-                Review entries
-              </Button>
-              <Button size="sm" variant="ghost" className="text-slate-200 hover:bg-white/10 hover:text-white">
-                Check trends
-              </Button>
-            </div>
-          </div>
-        </aside>
-
         <div className="flex min-w-0 flex-col gap-4">
           <header className="flex flex-col gap-4 rounded-[1.5rem] px-1 pt-1 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-2">
@@ -207,6 +99,70 @@ export function AppShell({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={syncBadgeVariant(syncState.state)}>{syncState.label}</Badge>
+              <div className="relative">
+                <Button
+                  aria-expanded={isDebugMenuOpen}
+                  aria-label="Debug"
+                  className="hidden rounded-full border border-amber-400/20 bg-amber-400/10 text-amber-100 hover:bg-amber-400/20 lg:inline-flex"
+                  onClick={() => setIsDebugMenuOpen((current) => !current)}
+                  size="sm"
+                  variant="ghost"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Debug
+                </Button>
+                {isDebugMenuOpen ? (
+                  <div className="absolute right-0 top-[calc(100%+0.5rem)] z-20 w-44 overflow-hidden rounded-2xl border border-white/10 bg-[#0f1830] p-1 shadow-[0_18px_40px_rgba(2,6,23,0.3)]">
+                    <button
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-slate-100 hover:bg-white/8"
+                      onClick={() => {
+                        setIsDebugMenuOpen(false);
+                        forceHardRefresh();
+                      }}
+                      type="button"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      Hard refresh
+                    </button>
+                    <button
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-amber-100 hover:bg-white/8"
+                      onClick={() => {
+                        setIsDebugMenuOpen(false);
+                        resetSiteState();
+                      }}
+                      type="button"
+                    >
+                      Reset site state
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              <div className="inline-flex items-center rounded-full border border-white/10 bg-white/5 p-1 shadow-[0_10px_24px_rgba(15,23,42,0.12)]">
+                <Button
+                  aria-label="Switch display currency to USD"
+                  size="sm"
+                  variant={settings.displayCurrency === "USD" ? "default" : "ghost"}
+                  className={cn(
+                    "h-9 rounded-full px-3 text-xs",
+                    settings.displayCurrency !== "USD" && "text-slate-200 hover:bg-white/10",
+                  )}
+                  onClick={() => setDisplayCurrency("USD")}
+                >
+                  USD
+                </Button>
+                <Button
+                  aria-label="Switch display currency to AUD"
+                  size="sm"
+                  variant={settings.displayCurrency === "AUD" ? "default" : "ghost"}
+                  className={cn(
+                    "h-9 rounded-full px-3 text-xs",
+                    settings.displayCurrency !== "AUD" && "text-slate-200 hover:bg-white/10",
+                  )}
+                  onClick={() => setDisplayCurrency("AUD")}
+                >
+                  AUD
+                </Button>
+              </div>
             </div>
           </header>
 

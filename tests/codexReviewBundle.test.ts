@@ -143,7 +143,7 @@ describe("Codex review bundle brief", () => {
   });
 
   it("supports SpaceX and custom reviewer overrides from the editor", () => {
-    const spacex = buildReviewerSpec({ symbol: "SPACEX" });
+    const spacex = buildReviewerSpec({ symbol: "SPCX" });
     expect(spacex.companyContext.companyName).toBe("SpaceX");
     expect(spacex.companyContext.sector).toContain("Space launch");
 

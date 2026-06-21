@@ -33,8 +33,10 @@ import {
   type DepositGuideNewsInput,
 } from "@/lib/domain/depositGuide";
 import { formatDisplayDate, todayIso } from "@/lib/domain/dates";
-import { formatCurrency, roundMoney } from "@/lib/domain/money";
+import { calculatePortfolioScenarioComparison } from "@/lib/domain/portfolioScenario";
+import { formatCurrency, formatShares, roundMoney } from "@/lib/domain/money";
 import { projectCatchUp, type ProjectionResult } from "@/lib/domain/projections";
+import type { TrackerBootstrapState } from "@/lib/shared-tracker/bootstrap";
 import {
   buildCurrentMonthSchoolDecision,
   buildSchoolDecisionCompoundTimeline,
@@ -107,8 +109,16 @@ const SCENARIOS: Record<
   },
 };
 
-export function ProjectionsClient() {
-  const tracker = useTrackerData();
+export function ProjectionsClient({
+  initialTrackerSnapshot,
+  initialTrackerSyncState,
+  initialDisplayCurrency,
+}: TrackerBootstrapState) {
+  const tracker = useTrackerData({
+    initialSnapshot: initialTrackerSnapshot,
+    initialSyncState: initialTrackerSyncState,
+    initialDisplayCurrency,
+  });
   const {
     snapshot,
     settings,
@@ -123,6 +133,7 @@ export function ProjectionsClient() {
     refreshMarketData,
     clearMarketDataCacheForSymbol,
   } = tracker;
+  const ticker = settings.baseTicker || "AAPL";
   const [contributionMode, setContributionMode] = useState<ContributionMode>("guide");
   const [scenario, setScenario] = useState<ScenarioKey>("base");
   const [customGrowthPercent, setCustomGrowthPercent] = useState(6);
@@ -322,6 +333,21 @@ export function ProjectionsClient() {
     includeDividends,
     currentPriceUsd,
   });
+  const scenarioComparison = calculatePortfolioScenarioComparison({
+    benchmarkTicker: ticker,
+    benchmarkShares: Math.max(0, metrics.equivalentSharesToday),
+    trades: snapshot.trades,
+    dailyPrices: snapshot.dailyPrices,
+    quotes: snapshot.quotes,
+    splits: settings.includeSplits ? snapshot.splits : [],
+    benchmarkCurrentPriceUsd: currentPriceUsd,
+    asOfDate: todayIso(),
+    anchorDate: `${todayIso().slice(0, 4)}-05-19`,
+    projectionMonths,
+    portfolioContributionAud: customContributionAud,
+    audUsdRate,
+    benchmarkTolerancePercent: 1,
+  });
 
   const studyLoanFormulaMonthlyAud = calculateStudyLoanMonthlyRepaymentAud(
     settings.studyLoanAnnualIncomeAud,
@@ -458,7 +484,7 @@ export function ProjectionsClient() {
     return (
       <AppShell
         title="Projections"
-        subtitle="Set up the original AAPL sale before modelling catch-up paths."
+        subtitle="Set up the original trade details before modelling catch-up paths."
       >
         <Card>
           <CardContent className="flex flex-col gap-4 p-6 md:flex-row md:items-center md:justify-between">
@@ -514,7 +540,10 @@ export function ProjectionsClient() {
   return (
     <AppShell
       title="Projections"
-      subtitle="Forward scenarios now use the same guide signal, article review summary, price-history health, and school-decision model as the dashboard."
+      subtitle={`Forward scenarios now use the same guide signal, article review summary, price-history health, and school-decision model as the dashboard for ${ticker}.`}
+      initialDisplayCurrency={initialDisplayCurrency}
+      initialTrackerSnapshot={initialTrackerSnapshot}
+      initialTrackerSyncState={initialTrackerSyncState}
     >
       <div className="space-y-6">
         {warning ? (
@@ -525,14 +554,14 @@ export function ProjectionsClient() {
 
         <div className="grid gap-4 lg:grid-cols-4">
           <MetricCard
-            title="AAPL Rebuild"
+            title={`${ticker} Rebuild`}
             value={formatCatchUpDate(selectedProjection.catchUpDate)}
             description={`${displayAudValue(Math.max(0, selectedMonthlyContributionAud))}/month, ${selectedScenarioLabel.toLowerCase()} case.`}
             tone={selectedProjection.catchUpDate ? "positive" : "warning"}
-            tooltip="The first projected month where the rebuilt AAPL path equals or passes Had I Held."
+            tooltip={`The first projected month where the rebuilt ${ticker} path equals or passes Had I Held.`}
           />
           <MetricCard
-            title="AAPL Rebuild Gap"
+            title={`${ticker} Rebuild Gap`}
             value={formatGap(selectedProjection.projectedGapUsd, displayUsdValue)}
             description={`At ${safeProjectionMonths} months from today.`}
             tone={selectedProjection.projectedGapUsd <= 0 ? "positive" : "default"}
@@ -544,7 +573,7 @@ export function ProjectionsClient() {
             tooltip="This is recalculated from the selected price growth, FX, dividend, and horizon assumptions."
           />
           <MetricCard
-            title="Main Guide"
+            title="Planner Guide"
             value={formatCurrency(depositGuide.recommendedDepositAud, "AUD")}
             description={`${formatSignedPercent(depositGuide.adjustmentPercent)} from neutral. Score ${depositGuide.signalScore.toFixed(2)}.`}
             tone={depositGuide.direction === "increase" ? "primary" : depositGuide.direction === "decrease" ? "warning" : "default"}
@@ -710,16 +739,16 @@ export function ProjectionsClient() {
         <Card>
           <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
-              <CardTitle>AAPL-Only Projection</CardTitle>
+              <CardTitle>{ticker} Projection</CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
-                AAPL-only view: Had I Held, rebuilt AAPL, and the remaining portfolio gap under the selected model.
+                {ticker} view: Had I Held, rebuilt {ticker}, and the remaining portfolio gap under the selected model.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Badge variant="secondary">{selectedScenarioLabel}</Badge>
               <Badge variant="outline">{displayAudValue(Math.max(0, selectedMonthlyContributionAud))}/month</Badge>
               <Badge variant={selectedProjection.catchUpDate ? "success" : "warning"}>
-                {selectedProjection.catchUpDate ? "AAPL-only catch-up projected" : "AAPL-only gap remains"}
+                {selectedProjection.catchUpDate ? "Catch-up projected" : "Gap remains"}
               </Badge>
             </div>
           </CardHeader>
@@ -729,10 +758,72 @@ export function ProjectionsClient() {
         </Card>
 
         <Card>
+          <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <CardTitle>Portfolio Scenario Check</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Compares the {scenarioComparison.benchmarkTicker} benchmark against the current portfolio mix using
+                each holding&apos;s own growth anchor, so later buys keep their real purchase window.
+              </p>
+            </div>
+            <Badge
+              variant={
+                scenarioComparison.status === "above target"
+                  ? "success"
+                  : scenarioComparison.status === "below target"
+                    ? "warning"
+                    : "secondary"
+              }
+            >
+              {scenarioComparison.status}
+            </Badge>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 md:grid-cols-4">
+              <ScenarioStat
+                label="AAPL benchmark now"
+                value={formatCurrency(scenarioComparison.benchmarkCurrentValueUsd, "USD")}
+                note={`${formatShares(scenarioComparison.benchmarkShares)} ${scenarioComparison.benchmarkTicker} shares at ${formatCurrency(scenarioComparison.benchmarkCurrentPriceUsd, "USD")}.`}
+              />
+              <ScenarioStat
+                label="AAPL benchmark target"
+                value={formatCurrency(scenarioComparison.benchmarkProjectedValueUsd, "USD")}
+                note={`${scenarioComparison.benchmarkGrowthPercent.toFixed(1)}% growth since 19 May.`}
+              />
+              <ScenarioStat
+                label="Portfolio mix target"
+                value={formatCurrency(scenarioComparison.portfolioProjectedValueUsd, "USD")}
+                note={`${scenarioComparison.holdings.length} held ticker${scenarioComparison.holdings.length === 1 ? "" : "s"} projected separately with ticker-specific anchors.`}
+              />
+              <ScenarioStat
+                label="Contribution projection"
+                value={formatCurrency(Math.abs(scenarioComparison.projectedDifferenceUsd), "USD")}
+                note={`${scenarioComparison.projectedDifferencePercent >= 0 ? "+" : ""}${scenarioComparison.projectedDifferencePercent.toFixed(2)}% vs benchmark.`}
+              />
+            </div>
+            <div className="mt-4 flex flex-col gap-3 rounded-lg border bg-background p-4 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="font-medium text-foreground">
+                  {scenarioComparison.status === "above target"
+                    ? "The combined portfolio is ahead of the benchmark."
+                    : scenarioComparison.status === "below target"
+                      ? "The combined portfolio is behind the benchmark."
+                      : "The combined portfolio is on target."}
+                </p>
+                <p className="mt-1">Projected difference: {formatCurrency(Math.abs(scenarioComparison.projectedDifferenceUsd), "USD")}.</p>
+              </div>
+              <p className="max-w-xl">
+                Assumption: the comparison excludes dividends and cash, so the signal stays focused on price growth only.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
           <CardHeader>
-            <CardTitle>AAPL-Only Projection Comparison</CardTitle>
+            <CardTitle>{ticker} Projection Comparison</CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
-              The guide can now move in fine increments, so this compares neutral, guided, selected, and school-repayment-aware deposits against the AAPL-only catch-up target.
+              The guide can now move in fine increments, so this compares neutral, guided, selected, and school-repayment-aware deposits against the catch-up target for {ticker}.
             </p>
           </CardHeader>
           <CardContent>
@@ -813,7 +904,7 @@ export function ProjectionsClient() {
             <CardHeader>
               <CardTitle>Market Data Health</CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
-                The guide uses cached/current price points; recent fixes fetch a seven-month lookback.
+                The guide uses cached/current price points for {ticker}; recent fixes fetch a seven-month lookback.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -821,7 +912,7 @@ export function ProjectionsClient() {
                 <GuideStat
                   label="Usable price points"
                   value={String(marketCacheSummary.usablePriceCount)}
-                  note={`${marketCacheSummary.allPriceCount} total cached ${settings.baseTicker} price rows.`}
+                  note={`${marketCacheSummary.allPriceCount} total cached ${ticker} price rows.`}
                 />
                 <GuideStat
                   label="Latest price row"
@@ -889,7 +980,7 @@ export function ProjectionsClient() {
               <div>
                 <CardTitle>School Repayment Decision</CardTitle>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Cash-flow-adjusted comparison of keeping the old AAPL holding versus paying off school debt and rebuilding AAPL.
+                  Cash-flow-adjusted comparison of keeping the old {ticker} holding versus paying off school debt and rebuilding {ticker}.
                 </p>
               </div>
               <Badge variant={currentMonthSchoolDecision.verdict === "cashOut" ? "success" : "warning"}>
@@ -906,7 +997,7 @@ export function ProjectionsClient() {
                   )}.`}
                 />
                 <GuideStat
-                  label="Keep AAPL net"
+                  label={`Keep ${ticker} net`}
                   value={formatCurrency(currentMonthSchoolDecision.keepAaplNetAud, "AUD")}
                   note={`After this month's ${formatCurrency(
                     activeStudyLoanMonthlyAud,
@@ -932,7 +1023,7 @@ export function ProjectionsClient() {
                 <div className="rounded-lg border bg-background p-4 text-sm text-muted-foreground">
                   Redirected school repayment floor is {formatCurrency(freedRepaymentAud, "AUD")}
                   /month. Over this horizon that adds about{" "}
-                  {formatCurrency(freedRepaymentValue.futureValueAud, "AUD")} of projected AAPL
+                  {formatCurrency(freedRepaymentValue.futureValueAud, "AUD")} of projected {ticker}
                   value under the active assumptions.
                 </div>
               ) : null}
@@ -1034,8 +1125,8 @@ function ProjectionComparisonRow({
         <Badge variant="outline">{displayAudValue(monthlyAud)}/month</Badge>
       </div>
       <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
-        <Detail label="AAPL-only catch-up" value={formatCatchUpDate(projection.catchUpDate)} />
-        <Detail label="AAPL-only end gap" value={formatGap(projection.projectedGapUsd, displayUsdValue)} />
+        <Detail label="Catch-up date" value={formatCatchUpDate(projection.catchUpDate)} />
+        <Detail label="End gap" value={formatGap(projection.projectedGapUsd, displayUsdValue)} />
         <Detail label="Required" value={displayAudValue(projection.requiredMonthlyContributionAud)} />
       </div>
     </div>
@@ -1058,6 +1149,24 @@ function GuideStat({
       </p>
       <p className="mt-2 break-words text-lg font-semibold">{value}</p>
       <p className="mt-2 text-xs leading-5 text-muted-foreground">{note}</p>
+    </div>
+  );
+}
+
+function ScenarioStat({
+  label,
+  value,
+  note,
+}: {
+  label: string;
+  value: string;
+  note: string;
+}) {
+  return (
+    <div className="rounded-lg border bg-background p-4">
+      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="mt-2 text-lg font-semibold">{value}</p>
+      <p className="mt-1 text-sm text-muted-foreground">{note}</p>
     </div>
   );
 }
@@ -1286,7 +1395,7 @@ function schoolVerdictLabel(decision: CurrentMonthSchoolDecision) {
     return "Pay off + rebuild ahead";
   }
   if (decision.verdict === "keepAapl") {
-    return "Keep AAPL ahead";
+    return "Keep the plan on track";
   }
   return "Roughly even";
 }

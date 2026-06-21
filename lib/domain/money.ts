@@ -59,6 +59,21 @@ export function formatCurrency(
   }).format(decimal(value).toNumber());
 }
 
+export function formatCurrencyCode(
+  value: Decimalish,
+  currency: Currency,
+  options?: Intl.NumberFormatOptions,
+) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    currencyDisplay: "code",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    ...options,
+  }).format(decimal(value).toNumber());
+}
+
 export function formatCompactCurrency(value: Decimalish, currency: Currency) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",

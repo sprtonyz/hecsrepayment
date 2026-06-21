@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
@@ -14,14 +14,24 @@ import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { formatDisplayDate, todayIso } from "@/lib/domain/dates";
 import { formatCurrency, roundMoney } from "@/lib/domain/money";
+import type { TrackerBootstrapState } from "@/lib/shared-tracker/bootstrap";
 import { useTrackerData } from "@/lib/storage/useTrackerData";
 import type { DividendMode, MarketProviderName, PriceMode } from "@/lib/storage/types";
 
 const steps = ["Sale details", "Catch-up plan", "Data preferences", "Review"];
+const DEFAULT_PLAN_START_DATE = "2026-04-01";
 
-export function SetupWizard() {
+export function SetupWizard({
+  initialTrackerSnapshot,
+  initialTrackerSyncState,
+  initialDisplayCurrency,
+}: TrackerBootstrapState) {
   const router = useRouter();
-  const tracker = useTrackerData();
+  const tracker = useTrackerData({
+    initialSnapshot: initialTrackerSnapshot,
+    initialSyncState: initialTrackerSyncState,
+    initialDisplayCurrency,
+  });
   const [step, setStep] = useState(0);
   const [saleDate, setSaleDate] = useState(todayIso());
   const [sharesSold, setSharesSold] = useState("77");
@@ -29,7 +39,7 @@ export function SetupWizard() {
   const [feesUsd, setFeesUsd] = useState("0");
   const [notes, setNotes] = useState("");
   const [planMonthlyContributionAud, setPlanMonthlyContributionAud] = useState("600");
-  const [planStartDate, setPlanStartDate] = useState(todayIso());
+  const [planStartDate, setPlanStartDate] = useState(DEFAULT_PLAN_START_DATE);
   const [planYears, setPlanYears] = useState("5");
   const [displayCurrency, setDisplayCurrency] = useState<"USD" | "AUD">("AUD");
   const [defaultPriceMode, setDefaultPriceMode] = useState<PriceMode>("live");
@@ -49,6 +59,17 @@ export function SetupWizard() {
     [grossProceedsUsd, fees],
   );
   const progress = ((step + 1) / steps.length) * 100;
+  const hasCompletedSetup = tracker.snapshot.saleEvents.length > 0;
+
+  useEffect(() => {
+    if (hasCompletedSetup) {
+      router.replace("/dashboard");
+    }
+  }, [hasCompletedSetup, router]);
+
+  if (hasCompletedSetup) {
+    return null;
+  }
 
   async function createTracker() {
     await tracker.createTracker({
@@ -95,6 +116,9 @@ export function SetupWizard() {
     <AppShell
       title="Get started"
       subtitle="Enter the sale details once, then set the monthly rebuild plan and data preferences."
+      initialDisplayCurrency={initialDisplayCurrency}
+      initialTrackerSnapshot={initialTrackerSnapshot}
+      initialTrackerSyncState={initialTrackerSyncState}
     >
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <Card>

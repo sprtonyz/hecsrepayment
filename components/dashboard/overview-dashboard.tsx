@@ -2,11 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   CheckCircle2,
   CircleDollarSign,
-  LineChart,
-  ListChecks,
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
   Target,
   Wallet,
 } from "lucide-react";
@@ -19,12 +21,44 @@ import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { calculateCatchUpMetrics } from "@/lib/domain/calculations";
 import { calculateDepositGuide } from "@/lib/domain/depositGuide";
-import { todayIso } from "@/lib/domain/dates";
+import { todayIso, targetEndDate } from "@/lib/domain/dates";
+import { calculatePortfolioScenarioComparison } from "@/lib/domain/portfolioScenario";
+import { formatCurrencyCode, formatShares, roundMoney } from "@/lib/domain/money";
 import { scoreCodexReviewForComparison } from "@/lib/news/codexReviewRanking";
+import type { ComparisonReviewSeed } from "@/lib/news/codexReviewLookup";
 import { useTrackerData } from "@/lib/storage/useTrackerData";
 import { cn } from "@/lib/utils";
 
+type TrackerDataOptions = NonNullable<Parameters<typeof useTrackerData>[0]>;
 const COMPARISON_SYMBOLS = ["AAPL", "NVDA", "AMZN", "TSLA", "SPACEX"] as const;
+
+function sortComparisonReviews<T extends { rankScore: number }>(reviews: T[]) {
+  return [...reviews].sort((left, right) => right.rankScore - left.rankScore);
+}
+
+function getEarliestLoggedMonthKey(
+  contributions: Array<{
+    id: string;
+    date: string;
+    ledgerGroupId?: string;
+    currencyEntered: string;
+    amount: number;
+    amountUsd: number;
+  }>,
+  trades: Array<{
+    id: string;
+    date: string;
+    ledgerGroupId?: string;
+    side: "BUY" | "SELL";
+    cashOutAud?: number;
+    totalAmountUsd: number;
+  }>,
+) {
+  const dates = [...contributions.map((item) => item.date), ...trades.map((item) => item.date)]
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right));
+  return dates[0]?.slice(0, 7);
+}
 
 type ComparisonReviewCard = {
   symbol: string;
@@ -51,8 +85,25 @@ type ComparisonReviewCard = {
   error?: string;
 };
 
-export function DashboardOverview() {
-  const tracker = useTrackerData();
+export function DashboardOverview({
+  initialTrackerSnapshot,
+  initialTrackerSyncState,
+  initialDisplayCurrency,
+  initialComparisonReviews,
+  initialComparisonLoading,
+}: {
+  initialTrackerSnapshot?: TrackerDataOptions["initialSnapshot"];
+  initialTrackerSyncState?: TrackerDataOptions["initialSyncState"];
+  initialDisplayCurrency?: TrackerDataOptions["initialDisplayCurrency"];
+  initialComparisonReviews?: ComparisonReviewSeed[];
+  initialComparisonLoading?: boolean;
+}) {
+  const tracker = useTrackerData({
+    initialSnapshot: initialTrackerSnapshot,
+    initialSyncState: initialTrackerSyncState,
+    initialDisplayCurrency,
+  });
+  const searchParams = useSearchParams();
   const {
     snapshot,
     settings,
@@ -113,15 +164,72 @@ export function DashboardOverview() {
       snapshot.dailyPrices,
     ],
   );
-
-  const currentMonthContributionAud = useMemo(
-    () => calculateCurrentMonthContributionAud(snapshot.contributions, asOfDate, latestUsdToAudRate),
-    [asOfDate, latestUsdToAudRate, snapshot.contributions],
+  const portfolioScenarioComparison = useMemo(
+    () =>
+      calculatePortfolioScenarioComparison({
+        benchmarkTicker: settings.baseTicker,
+        benchmarkShares: metrics.equivalentSharesToday,
+        trades: snapshot.trades,
+        dailyPrices: snapshot.dailyPrices,
+        quotes: snapshot.quotes,
+        splits: settings.includeSplits ? snapshot.splits : [],
+        benchmarkCurrentPriceUsd: currentPriceUsd,
+        asOfDate,
+        anchorDate: `${asOfDate.slice(0, 4)}-05-19`,
+        projectionMonths: 53,
+        portfolioContributionAud: settings.planMonthlyContributionAud,
+        audUsdRate: latestAudToUsdRate,
+        benchmarkTolerancePercent: 1,
+      }),
+    [
+      asOfDate,
+      currentPriceUsd,
+      latestAudToUsdRate,
+      metrics.equivalentSharesToday,
+      settings.baseTicker,
+      settings.includeSplits,
+      settings.planMonthlyContributionAud,
+      snapshot.dailyPrices,
+      snapshot.splits,
+      snapshot.trades,
+    ],
   );
+  const currentMonthLoggedAud = useMemo(
+    () => {
+      const currentMonth = calculateCurrentMonthLoggedAud(
+        snapshot.contributions,
+        snapshot.trades,
+        asOfDate,
+        latestUsdToAudRate,
+      );
+      if (currentMonth > 0) {
+        return currentMonth;
+      }
+      const latestActivityMonth = getLatestLoggedMonthKey(snapshot.contributions, snapshot.trades);
+      return latestActivityMonth
+        ? calculateLoggedTransactionsAud(
+            snapshot.contributions,
+            snapshot.trades,
+            latestActivityMonth,
+            latestUsdToAudRate,
+          )
+        : 0;
+    },
+    [asOfDate, latestUsdToAudRate, snapshot.contributions, snapshot.trades],
+  );
+  const differencePreviewOverride = searchParams.get("differencePreview");
+  const differenceTone =
+    differencePreviewOverride === "positive"
+      ? "positive"
+      : differencePreviewOverride === "negative"
+        ? "negative"
+        : portfolioScenarioComparison.projectedDifferenceUsd >= 0
+          ? "positive"
+          : "negative";
 
   const progressPercent =
     settings.planMonthlyContributionAud > 0
-      ? Math.min(100, (currentMonthContributionAud / settings.planMonthlyContributionAud) * 100)
+      ? Math.min(100, (currentMonthLoggedAud / settings.planMonthlyContributionAud) * 100)
       : 0;
 
   const currency = settings.displayCurrency;
@@ -139,23 +247,87 @@ export function DashboardOverview() {
       maximumFractionDigits: digits,
     }).format(amount);
   };
+  const formatScenarioMoney = (amountUsd: number, digits = 0) =>
+    currency === "USD"
+      ? formatCurrencyCode(amountUsd, "USD", {
+          minimumFractionDigits: digits,
+          maximumFractionDigits: digits,
+        })
+      : formatCurrencyCode(amountUsd * latestUsdToAudRate, "AUD", {
+          minimumFractionDigits: digits,
+          maximumFractionDigits: digits,
+        });
 
-  const heroAhead = metrics.paceDifferenceAud >= 0;
-  const heroValue = formatMoney(Math.abs(metrics.paceDifferenceAud));
-  const heroLabel = heroAhead ? "You are ahead this month" : "You are behind this month";
-  const heroValueLabel = heroAhead ? "ahead" : "short";
-  const heroSummary = heroAhead
-    ? `You've logged ${formatMoney(currentMonthContributionAud)} so far, which is ${heroValue} above the expected pace.`
-    : `You've logged ${formatMoney(currentMonthContributionAud)} so far, which is ${heroValue} short of the expected pace.`;
-  const gapRemainingAud = Math.max(0, depositGuide.remainingThisMonthAud);
+  const newPortfolioValueUsd = useMemo(
+    () =>
+      roundMoney(
+        portfolioScenarioComparison.holdings.reduce(
+          (total, holding) => total + holding.currentValueUsd,
+          0,
+        ),
+      ),
+    [portfolioScenarioComparison.holdings],
+  );
+  const newPortfolioValue = formatScenarioMoney(newPortfolioValueUsd, 0);
+  const newPortfolioSummary = `Your current portfolio is worth ${newPortfolioValue}, based on the live value of the holdings you currently hold.`;
+  const gapRemainingAud = Math.max(0, settings.planMonthlyContributionAud - currentMonthLoggedAud);
   const catchUpLabel = metrics.catchUpGapAud >= 0 ? "Gap remaining" : "Ahead of plan";
   const catchUpValue = formatMoney(Math.abs(metrics.catchUpGapAud));
-  const statusLabel = heroAhead ? "On track" : "Needs attention";
-  const recentBars = useMemo(() => buildRecentContributionBars(snapshot.contributions, asOfDate), [asOfDate, snapshot.contributions]);
+  const monthAhead = currentMonthLoggedAud >= settings.planMonthlyContributionAud;
+  const monthValueLabel = monthAhead ? "ahead" : "short";
+  const activityStartDate =
+    getEarliestLoggedMonthKey(snapshot.contributions, snapshot.trades) ||
+    settings.planStartDate;
+  const recentBars = useMemo(
+    () =>
+      buildRecentContributionBars(
+        snapshot.contributions,
+        snapshot.trades,
+        activityStartDate,
+        targetEndDate(settings.planStartDate, settings.planYears),
+        latestUsdToAudRate,
+      ),
+    [
+      activityStartDate,
+      latestUsdToAudRate,
+      settings.planStartDate,
+      settings.planYears,
+      snapshot.contributions,
+      snapshot.trades,
+    ],
+  );
+  const defaultRecentBarIndex = useMemo(() => {
+    if (recentBars.length === 0) {
+      return 0;
+    }
+    for (let index = recentBars.length - 1; index >= 0; index -= 1) {
+      if (recentBars[index]?.valueAud > 0) {
+        return index;
+      }
+    }
+    return 0;
+  }, [recentBars]);
+  const [selectedRecentBarIndex, setSelectedRecentBarIndex] = useState<number | null>(null);
+  const safeRecentBarIndex =
+    recentBars.length > 0
+      ? Math.min(selectedRecentBarIndex ?? defaultRecentBarIndex, recentBars.length - 1)
+      : 0;
+  const selectedRecentBar =
+    recentBars[safeRecentBarIndex] ?? recentBars[recentBars.length - 1] ?? null;
+  const recentWindowSize = 12;
+  const [recentWindowStart, setRecentWindowStart] = useState(0);
+  const maxRecentWindowStart = Math.max(0, recentBars.length - recentWindowSize);
+  const safeRecentWindowStart = Math.min(recentWindowStart, maxRecentWindowStart);
+  const visibleRecentBars = recentBars.slice(safeRecentWindowStart, safeRecentWindowStart + recentWindowSize);
+  const visibleWindowEnd = Math.min(safeRecentWindowStart + recentWindowSize, recentBars.length);
   const codexReviewMonth = asOfDate.slice(0, 7);
-  const [comparisonLoading, setComparisonLoading] = useState(true);
+  const [comparisonLoading, setComparisonLoading] = useState(
+    initialComparisonLoading ?? Boolean(!initialComparisonReviews),
+  );
   const [comparisonError, setComparisonError] = useState<string | undefined>();
-  const [comparisonReviews, setComparisonReviews] = useState<ComparisonReviewCard[]>([]);
+  const [comparisonReviews, setComparisonReviews] = useState<ComparisonReviewSeed[]>(() => {
+    return sortComparisonReviews(initialComparisonReviews ?? []);
+  });
 
   useEffect(() => {
     let isActive = true;
@@ -247,27 +419,27 @@ export function DashboardOverview() {
   return (
     <AppShell title="Dashboard" subtitle="See your status at a glance. Less jargon, more meaning.">
       <div className="grid gap-4 lg:gap-5">
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_20rem]">
+        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)]">
           <Card className="border border-slate-800/70 bg-[#0f1830] text-slate-100 shadow-[0_30px_100px_rgba(2,6,23,0.36)]">
             <CardContent className="p-5 sm:p-6 lg:p-7">
-              <div className="flex flex-col gap-6">
-                <div className="space-y-4">
-                  <p className="text-sm font-semibold text-emerald-400">{heroLabel}</p>
-                  <p className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-                    {heroValue} {heroValueLabel}
+              <div className="flex flex-col gap-5">
+                <div className="space-y-3">
+                  <p className="text-sm font-semibold text-emerald-400">New Portfolio</p>
+                  <p className="text-4xl font-semibold tracking-tight text-white sm:text-[3.45rem]">
+                    {newPortfolioValue}
                   </p>
-                  <p className="max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
-                    {heroSummary}
+                  <p className="max-w-2xl text-sm leading-6 text-slate-300 sm:text-[0.98rem]">
+                    {newPortfolioSummary}
                   </p>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_21rem]">
-                  <div className="rounded-[1.6rem] border border-white/10 bg-white/5 p-5 shadow-[0_10px_30px_rgba(15,23,42,0.12)]">
+                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,0.58fr)]">
+                  <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4 shadow-[0_10px_30px_rgba(15,23,42,0.12)]">
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <p className="text-sm font-semibold text-white">Monthly pace</p>
                         <p className="mt-2 text-3xl font-semibold tracking-tight text-white">
-                          {formatMoney(currentMonthContributionAud)}
+                          {formatMoney(currentMonthLoggedAud)}
                         </p>
                       </div>
                       <div className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300">
@@ -275,26 +447,41 @@ export function DashboardOverview() {
                       </div>
                     </div>
                     <div className="mt-4">
-                      <Progress value={progressPercent} className="h-3 bg-white/8" />
+                      <Progress value={progressPercent} className="h-2.5 bg-white/8" />
                     </div>
                     <p className="mt-3 text-sm leading-6 text-slate-300">
-                      {formatMoney(gapRemainingAud)} remains to hit the monthly target of {formatMoney(settings.planMonthlyContributionAud)}.
+                      {formatMoney(gapRemainingAud)} remains to hit the monthly target of{" "}
+                      {formatMoney(settings.planMonthlyContributionAud)}.
                     </p>
                   </div>
 
-                  <div className="rounded-[1.6rem] border border-white/10 bg-white/5 p-5 shadow-[0_10px_30px_rgba(15,23,42,0.12)]">
-                    <p className="text-sm font-semibold text-emerald-400">On track</p>
-                    <p className="mt-3 text-sm font-medium text-slate-400">Progress</p>
-                    <div className="mt-2">
-                      <Progress
-                        value={Math.max(10, Math.min(100, metrics.catchUpProgressPercent))}
-                        className="h-3 bg-white/8"
-                      />
+                  <div className="rounded-[1.5rem] border border-white/10 bg-[#101a32] p-4 shadow-[0_10px_30px_rgba(15,23,42,0.12)]">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-emerald-400">On track</p>
+                        <p className="mt-2 text-sm leading-6 text-slate-400">Progress</p>
+                      </div>
+                      <div className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300">
+                        {Math.round(progressPercent)}% logged
+                      </div>
                     </div>
-                    <p className="mt-4 text-sm leading-6 text-slate-300">
-                      {Math.round(metrics.catchUpProgressPercent)}% of the catch-up target is already covered.
-                      Only one clear decision remains: keep logging, pause, or review the plan.
-                    </p>
+                    <div className="mt-4">
+                      <Progress value={progressPercent} className="h-2.5 bg-white/8" />
+                    </div>
+                    <div className="mt-4 rounded-[1.3rem] border border-white/10 bg-white/5 p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="rounded-2xl bg-emerald-500/15 p-2 text-emerald-300">
+                          <CheckCircle2 className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-white">
+                            {Math.round(progressPercent)}% of the catch-up target is already
+                            covered. Only one clear decision remains: keep logging, pause, or review
+                            the plan.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -302,35 +489,48 @@ export function DashboardOverview() {
           </Card>
 
           <Card className="border border-slate-800/70 bg-[#0f1830] text-slate-100 shadow-[0_30px_100px_rgba(2,6,23,0.28)]">
-            <CardContent className="p-5 sm:p-6">
-              <div className="flex h-full flex-col">
-                <div className="flex items-center justify-between gap-3">
+            <CardContent className="p-4 sm:p-5">
+              <div className="flex h-full flex-col gap-4">
+                <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-white">{statusLabel}</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-400">Progress</p>
+                    <p className="text-sm font-semibold text-white">Needs attention</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">Portfolio vs benchmark</p>
                   </div>
-                  <Badge variant="outline" className="border-emerald-500/20 bg-emerald-500/10 text-emerald-200">
+                  <Badge
+                    variant="outline"
+                    className="border-emerald-500/20 bg-emerald-500/10 text-emerald-200"
+                  >
                     Updated now
                   </Badge>
                 </div>
 
-                <div className="mt-4">
-                  <Progress value={Math.min(100, progressPercent)} className="h-3 bg-white/8" />
-                </div>
-
-                <div className="mt-5 flex-1 rounded-[1.4rem] border border-white/10 bg-white/5 p-4">
-                  <div className="flex items-start gap-3">
-                    <div className="rounded-2xl bg-emerald-500/15 p-2 text-emerald-300">
-                      <CheckCircle2 className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-white">
-                        {Math.round(progressPercent)}% of the monthly target is already logged.
-                      </p>
-                      <p className="mt-2 text-sm leading-6 text-slate-300">
-                        {formatMoney(gapRemainingAud)} is the only number left to close if the goal is to stay on the same track.
-                      </p>
-                    </div>
+                <div className="rounded-[1.35rem] border border-white/10 bg-white/5 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">
+                      Months 0-53
+                    </p>
+                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-slate-300">
+                      53 months
+                    </span>
+                  </div>
+                  <div className="mt-3">
+                    <ComparisonLineGraph
+                      benchmarkCurrentValueUsd={portfolioScenarioComparison.benchmarkCurrentValueUsd}
+                      benchmarkProjectedValueUsd={portfolioScenarioComparison.benchmarkProjectedValueUsd}
+                      portfolioCurrentValueUsd={newPortfolioValueUsd}
+                      portfolioProjectedValueUsd={portfolioScenarioComparison.portfolioProjectedValueUsd}
+                      months={portfolioScenarioComparison.projectionMonths}
+                    />
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-300">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-1">
+                      <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                      Portfolio
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-1">
+                      <span className="h-2 w-2 rounded-full bg-sky-400" />
+                      Benchmark
+                    </span>
                   </div>
                 </div>
               </div>
@@ -343,7 +543,7 @@ export function DashboardOverview() {
             color="emerald"
             icon={<Wallet className="h-4 w-4" />}
             label="Logged this month"
-            value={formatMoney(currentMonthContributionAud)}
+            value={formatMoney(currentMonthLoggedAud)}
             note="Matches the plan so far."
           />
           <MiniMetricCard
@@ -362,13 +562,13 @@ export function DashboardOverview() {
           />
         </section>
 
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
+        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
           <Card className="border border-slate-800/70 bg-[#0f1830] text-slate-100 shadow-[0_30px_100px_rgba(2,6,23,0.28)]">
             <CardContent className="p-5 sm:p-6">
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-sm font-semibold text-slate-400">What needs attention</p>
-                  <h2 className="mt-2 max-w-lg text-2xl font-semibold tracking-tight text-white sm:text-[2rem]">
+                  <h2 className="mt-2 max-w-lg text-xl font-semibold tracking-tight text-white sm:text-2xl">
                     Three plain-language prompts replace the old long checklist.
                   </h2>
                 </div>
@@ -378,29 +578,29 @@ export function DashboardOverview() {
               </div>
 
               <div className="mt-5 grid gap-3">
-                <ActionRow
-                  tone="emerald"
-                  icon={<Wallet className="h-4 w-4" />}
-                  title="Log today's deposit"
+                <ActionPrompt
+                  icon={<CheckCircle2 className="h-4 w-4" />}
+                  title="Log today&apos;s deposit"
                   text="One tap gets you back on track."
                   cta="Do now"
                   href="/transactions"
+                  tone="emerald"
                 />
-                <ActionRow
-                  tone="amber"
-                  icon={<ListChecks className="h-4 w-4" />}
+                <ActionPrompt
+                  icon={<Target className="h-4 w-4" />}
                   title="Review transactions"
                   text="Check for anything that looks wrong."
                   cta="Check"
                   href="/transactions"
+                  tone="amber"
                 />
-                <ActionRow
-                  tone="blue"
-                  icon={<LineChart className="h-4 w-4" />}
+                <ActionPrompt
+                  icon={<ArrowRight className="h-4 w-4" />}
                   title="Open projections"
                   text="See how this month changes the story."
                   cta="View"
                   href="/projections"
+                  tone="blue"
                 />
               </div>
             </CardContent>
@@ -411,41 +611,243 @@ export function DashboardOverview() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-sm font-semibold text-slate-400">Recent activity</p>
-                  <h2 className="mt-2 max-w-md text-2xl font-semibold tracking-tight text-white sm:text-[2rem]">
+                  <h2 className="mt-2 max-w-md text-xl font-semibold tracking-tight text-white sm:text-2xl">
                     A visual feed that feels like a timeline, not a spreadsheet.
                   </h2>
                 </div>
                 <Badge variant="outline" className="border-white/10 bg-white/5 text-slate-200">
-                  10 months
+                  {recentBars.length} months
                 </Badge>
               </div>
 
-              <div className="mt-6 rounded-[1.6rem] border border-white/8 bg-white/5 p-4">
-                <div className="flex h-56 items-end gap-3">
-                  {recentBars.map((bar) => (
-                    <div key={`${bar.label}-${bar.index}`} className="flex min-h-0 flex-1 flex-col items-center justify-end gap-2">
-                      <div className="flex h-full w-full items-end justify-center">
-                        <div
-                          className={cn(
-                            "w-5 rounded-full shadow-[0_14px_24px_rgba(59,109,246,0.18)]",
-                            bar.tint === "blue" && "bg-[#5f88f8]",
-                            bar.tint === "emerald" && "bg-[#28c08d]",
-                            bar.tint === "amber" && "bg-[#f0b83c]",
-                          )}
-                          style={{ height: `${Math.max(18, bar.height)}%` }}
-                        />
-                      </div>
-                      <span className="text-[11px] font-medium text-slate-400">{bar.label}</span>
+              <div className="mt-5 rounded-[1.45rem] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.02))] p-3 sm:p-4">
+                <div className="rounded-[1.15rem] border border-white/6 bg-[#0b1327] px-3 pt-3">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
+                      <span>
+                        {safeRecentWindowStart + 1} to {visibleWindowEnd} of {recentBars.length}
+                      </span>
+                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-slate-300">
+                        12 months at a time
+                      </span>
                     </div>
-                  ))}
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 border-white/10 bg-white/5 px-3 text-slate-200 hover:bg-white/10"
+                        onClick={() =>
+                          setRecentWindowStart((current) => Math.max(0, current - recentWindowSize))
+                        }
+                        disabled={safeRecentWindowStart === 0}
+                      >
+                        <ChevronLeft className="mr-1 h-4 w-4" />
+                        Prev 12
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 border-white/10 bg-white/5 px-3 text-slate-200 hover:bg-white/10"
+                        onClick={() =>
+                          setRecentWindowStart((current) =>
+                            Math.min(maxRecentWindowStart, current + recentWindowSize),
+                          )
+                        }
+                        disabled={safeRecentWindowStart === maxRecentWindowStart}
+                      >
+                        Next 12
+                        <ChevronRight className="ml-1 h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-12 gap-1 overflow-hidden pb-2 sm:gap-2">
+                    {visibleRecentBars.map((bar) => {
+                      const isSelected = selectedRecentBarIndex === bar.index;
+                      return (
+                        <button
+                          key={`${bar.label}-${bar.index}`}
+                          type="button"
+                          onClick={() => setSelectedRecentBarIndex(bar.index)}
+                          onMouseEnter={() => setSelectedRecentBarIndex(bar.index)}
+                          onFocus={() => setSelectedRecentBarIndex(bar.index)}
+                          className="group flex h-44 min-w-0 flex-col justify-end gap-1 rounded-none outline-none transition-transform duration-200 focus-visible:ring-2 focus-visible:ring-white/40 sm:h-48"
+                          aria-pressed={isSelected}
+                          aria-label={`${bar.fullLabel}: ${formatMoney(bar.valueAud)}`}
+                        >
+                          <div className="flex h-full w-full items-end justify-center overflow-visible">
+                            <div
+                              className={cn(
+                                "w-full rounded-none bg-[#5f88f8] shadow-[0_10px_18px_rgba(59,109,246,0.16)] transition-all duration-200",
+                                bar.valueAud <= 0 ? "opacity-30" : "opacity-95",
+                                isSelected && "opacity-100 ring-2 ring-white/45",
+                              )}
+                              style={{ height: `${Math.max(2, bar.height)}%` }}
+                            />
+                          </div>
+                          <span
+                            className={cn(
+                              "text-[10px] font-medium leading-none tracking-[0.12em]",
+                              isSelected ? "text-white" : "text-slate-400",
+                            )}
+                          >
+                            {bar.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-3 rounded-[1.1rem] border border-white/10 bg-[#101a32] px-3 py-3">
+                    <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">
+                          Selected month
+                        </p>
+                        <p className="mt-1 text-base font-semibold text-white sm:text-lg">
+                          {selectedRecentBar?.fullLabel ?? "No activity yet"}
+                        </p>
+                      </div>
+                      <div className="text-left sm:text-right">
+                        <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">
+                          Monthly logged
+                        </p>
+                        <p className="mt-1 text-xl font-semibold text-white sm:text-2xl">
+                          {selectedRecentBar ? formatMoney(selectedRecentBar.valueAud) : formatMoney(0)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <p className="mt-4 text-sm leading-6 text-slate-400">
-                This trend card stays visual so the user does not have to decode a table.
+              <p className="mt-3 text-sm leading-6 text-slate-400">
+                Hover or click any bar to inspect that month&apos;s logged total.
               </p>
             </CardContent>
           </Card>
+        </section>
+
+        <section className="grid gap-4">
+          <Card className="overflow-hidden border border-slate-800/70 bg-[#0f1830] text-slate-100 shadow-[0_30px_100px_rgba(2,6,23,0.32)]">
+            <div className="border-b border-white/10 bg-[#101a32] px-5 py-5 text-white sm:px-6">
+              <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold uppercase tracking-[0.28em] text-slate-400">
+                    Portfolio scenario check
+                  </p>
+                  <h2 className="text-2xl font-semibold tracking-tight sm:text-[2rem]">
+                    53-month growth projection versus the live portfolio mix.
+                  </h2>
+                  <p className="max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">
+                    The benchmark starts with {formatShares(portfolioScenarioComparison.benchmarkShares)}{" "}
+                    {portfolioScenarioComparison.benchmarkTicker} shares. It uses the price change
+                    from 19 May to today as the current growth rate, then projects both the
+                    benchmark and the current mix forward to the 53-month due date before comparing
+                    the end values.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge
+                    className="border-white/10 bg-white/10 text-white"
+                    variant={
+                      portfolioScenarioComparison.status === "above target"
+                        ? "success"
+                        : portfolioScenarioComparison.status === "below target"
+                          ? "warning"
+                          : "secondary"
+                    }
+                  >
+                    {portfolioScenarioComparison.status}
+                  </Badge>
+                  <Badge className="border-white/10 bg-white/10 text-white" variant="outline">
+                    {portfolioScenarioComparison.benchmarkGrowthPercent.toFixed(1)}% since 19 May
+                  </Badge>
+                  <Badge className="border-white/10 bg-white/10 text-white" variant="outline">
+                    {portfolioScenarioComparison.projectionMonths}-month projection
+                  </Badge>
+                </div>
+              </div>
+            </div>
+            <CardContent className="space-y-4 p-5 sm:p-6">
+              <div className="grid gap-3 md:grid-cols-4">
+                <ScenarioMetric
+                  label="AAPL benchmark now"
+                  value={formatScenarioMoney(portfolioScenarioComparison.benchmarkCurrentValueUsd)}
+                  note={`${formatShares(portfolioScenarioComparison.benchmarkShares)} shares at ${formatScenarioMoney(portfolioScenarioComparison.benchmarkCurrentPriceUsd, 2)}.`}
+                />
+                <ScenarioMetric
+                  label="AAPL benchmark target"
+                  value={formatScenarioMoney(portfolioScenarioComparison.benchmarkProjectedValueUsd)}
+                  note={`Linear projection to month ${portfolioScenarioComparison.projectionMonths}: ${Math.abs(portfolioScenarioComparison.benchmarkProjectedGrowthPercent).toFixed(2)}% ${portfolioScenarioComparison.benchmarkProjectedGrowthPercent >= 0 ? "above" : "below"} the current value.`}
+                />
+                <ScenarioMetric
+                  label="Portfolio mix target"
+                  value={formatScenarioMoney(portfolioScenarioComparison.portfolioProjectedValueUsd)}
+                  note={`Linear mix lift to month ${portfolioScenarioComparison.projectionMonths}: ${((portfolioScenarioComparison.portfolioGrowthMultiplier - 1) * 100).toFixed(2)}%.`}
+                />
+                <ScenarioMetric
+                  label="Difference"
+                  value={formatScenarioMoney(Math.abs(portfolioScenarioComparison.projectedDifferenceUsd))}
+                  note={`${portfolioScenarioComparison.projectedDifferencePercent >= 0 ? "+" : ""}${portfolioScenarioComparison.projectedDifferencePercent.toFixed(2)}% vs the benchmark.`}
+                  tone={differenceTone}
+                />
+              </div>
+              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
+                <div className="rounded-[1.2rem] border border-white/10 bg-white/5 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-white">
+                      {portfolioScenarioComparison.status === "above target"
+                        ? "The combined portfolio is ahead of the AAPL benchmark."
+                        : portfolioScenarioComparison.status === "below target"
+                          ? "The combined portfolio is behind the AAPL benchmark."
+                          : "The combined portfolio is tracking the AAPL benchmark."}
+                    </p>
+                    <Badge variant="outline" className="border-white/10 bg-white/5 text-slate-200">
+                      19 May anchor
+                    </Badge>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-300">
+                    The growth rate is measured from 19 May to today, then applied linearly to the
+                    53-month due date. The mix target uses the full planned contribution stream,
+                    then distributes it across the current tickers and applies the same linear
+                    growth logic so the estimate stays closer to the portfolio you are actually
+                    building.
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {portfolioScenarioComparison.holdings.slice(0, 4).map((holding) => (
+                      <Badge key={holding.ticker} variant="outline">
+                        {holding.ticker} {holding.growthMultiplier.toFixed(2)}x since {holding.anchorDate}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-[1.2rem] border border-white/10 bg-white/5 p-4">
+                  <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">
+                    Top holdings
+                  </p>
+                  <div className="mt-3 space-y-3">
+                    {portfolioScenarioComparison.holdings.slice(0, 3).map((holding) => (
+                      <div key={holding.ticker} className="rounded-xl border border-white/10 bg-[#101a32] p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="font-medium text-white">{holding.ticker}</p>
+                          <p className="text-sm text-slate-300">{formatScenarioMoney(holding.projectedValueUsd)}</p>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-400">
+                          {formatShares(holding.shares)} shares now, {holding.growthMultiplier.toFixed(2)}x since {holding.anchorDate}.
+                        </p>
+                        <p className="mt-1 text-xs text-slate-400">
+                          Current price: {formatScenarioMoney(holding.currentPriceUsd, 2)}.
+                        </p>
+                      </div>
+                    ))}
+                    {portfolioScenarioComparison.holdings.length === 0 ? (
+                      <p className="text-sm text-slate-400">No holdings with usable price history were found.</p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
         </section>
 
         <section className="grid gap-4">
@@ -635,7 +1037,7 @@ export function DashboardOverview() {
                           color="emerald"
                           icon={<Wallet className="h-4 w-4" />}
                           label="Logged this month"
-                          value={formatMoney(currentMonthContributionAud)}
+                          value={formatMoney(currentMonthLoggedAud)}
                           note="What has already landed."
                         />
                         <MiniMetricCard
@@ -650,7 +1052,7 @@ export function DashboardOverview() {
                           icon={<CircleDollarSign className="h-4 w-4" />}
                           label="Still to close"
                           value={formatMoney(gapRemainingAud)}
-                          note={heroAhead ? "Keep pace to stay ahead." : "A small catch-up remains."}
+                          note={monthAhead ? "Keep pace to stay ahead." : "A small catch-up remains."}
                         />
                       </div>
                     </div>
@@ -658,11 +1060,10 @@ export function DashboardOverview() {
                     <div className="rounded-[1.6rem] border border-white/10 bg-[#101a32] p-5 text-white">
                       <p className="text-sm font-semibold text-slate-400">Short answer</p>
                       <p className="mt-3 text-2xl font-semibold tracking-tight">
-                        {heroAhead ? "You are ahead this month." : "You are behind this month."}
+                        {monthAhead ? "You are ahead this month." : "You are behind this month."}
                       </p>
                       <p className="mt-3 text-sm leading-6 text-slate-300">
-                        {heroSummary} Open projections if you want the more technical debt and
-                        rebuild breakdown.
+                        Open projections if you want the more technical debt and rebuild breakdown.
                       </p>
                       <div className="mt-5 grid gap-3">
                         <div className="rounded-[1.2rem] border border-white/10 bg-white/5 p-4">
@@ -687,8 +1088,8 @@ export function DashboardOverview() {
 
                 <TabsContent value="details" className="mt-5">
                   <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    <DetailTile label="Value ahead / short" value={`${formatMoney(Math.abs(metrics.paceDifferenceAud))} ${heroValueLabel}`} />
-                    <DetailTile label="Current logged" value={formatMoney(currentMonthContributionAud)} />
+                    <DetailTile label="Value ahead / short" value={`${formatMoney(Math.abs(metrics.paceDifferenceAud))} ${monthValueLabel}`} />
+                    <DetailTile label="Current logged" value={formatMoney(currentMonthLoggedAud)} />
                     <DetailTile label="Target" value={formatMoney(settings.planMonthlyContributionAud)} />
                     <DetailTile label="Monthly progress" value={`${Math.round(progressPercent)}%`} />
                     <DetailTile label="Comparison month" value={codexReviewMonth} />
@@ -743,20 +1144,20 @@ function MiniMetricCard({
   );
 }
 
-function ActionRow({
-  tone,
+function ActionPrompt({
   icon,
   title,
   text,
   cta,
   href,
+  tone,
 }: {
-  tone: "emerald" | "amber" | "blue";
   icon: React.ReactNode;
   title: string;
   text: string;
   cta: string;
   href: string;
+  tone: "emerald" | "amber" | "blue";
 }) {
   const accent =
     tone === "emerald"
@@ -772,7 +1173,12 @@ function ActionRow({
         <p className="font-medium text-white">{title}</p>
         <p className="mt-1 text-sm leading-6 text-slate-400">{text}</p>
       </div>
-      <Button asChild size="sm" variant="outline" className="border-white/10 bg-white/5 text-slate-100 hover:bg-white/10">
+      <Button
+        asChild
+        size="sm"
+        variant="outline"
+        className="border-white/10 bg-white/5 text-slate-100 hover:bg-white/10"
+      >
         <Link href={href}>{cta}</Link>
       </Button>
     </div>
@@ -793,6 +1199,45 @@ function MiniStatusChip({
       <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">{label}</p>
       <p className="mt-2 text-lg font-semibold text-white">{value}</p>
       <p className="mt-1 text-sm leading-6 text-slate-400">{note}</p>
+    </div>
+  );
+}
+
+function ScenarioMetric({
+  label,
+  value,
+  note,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  note: string;
+  tone?: "neutral" | "positive" | "negative";
+}) {
+  const accent =
+    tone === "positive"
+      ? "border-emerald-500/20 bg-emerald-500/10"
+      : tone === "negative"
+        ? "border-rose-500/20 bg-rose-500/10"
+        : "border-white/10 bg-[#101a32]";
+  const valueTone =
+    tone === "positive"
+      ? "text-emerald-200"
+      : tone === "negative"
+        ? "text-rose-200"
+        : "text-white";
+  const noteTone =
+    tone === "positive"
+      ? "text-emerald-100/80"
+      : tone === "negative"
+        ? "text-rose-100/80"
+        : "text-slate-400";
+
+  return (
+    <div className={cn("rounded-[1.2rem] border p-4", accent)}>
+      <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">{label}</p>
+      <p className={cn("mt-2 text-lg font-semibold", valueTone)}>{value}</p>
+      <p className={cn("mt-1 text-sm leading-6", noteTone)}>{note}</p>
     </div>
   );
 }
@@ -822,48 +1267,306 @@ function calculateCurrentMonthContributionAud(
     }, 0);
 }
 
-function buildRecentContributionBars(
-  contributions: Array<{ date: string; currencyEntered: string; amount: number; amountUsd: number }>,
+function calculateCurrentMonthLoggedAud(
+  contributions: Array<{
+    id: string;
+    date: string;
+    ledgerGroupId?: string;
+    currencyEntered: string;
+    amount: number;
+    amountUsd: number;
+  }>,
+  trades: Array<{
+    id: string;
+    date: string;
+    ledgerGroupId?: string;
+    side: "BUY" | "SELL";
+    cashOutAud?: number;
+    totalAmountUsd: number;
+  }>,
   asOfDate: string,
+  latestUsdToAudRate: number,
 ) {
-  const months: Array<{ label: string; value: number }> = [];
-  for (let index = 9; index >= 0; index -= 1) {
-    const monthDate = new Date(`${asOfDate}T00:00:00`);
-    monthDate.setMonth(monthDate.getMonth() - index);
-    const key = format(monthDate, "yyyy-MM");
-    const label = format(monthDate, "MMM");
-    const value = contributions
-      .filter((contribution) => contribution.date.slice(0, 7) === key)
-      .reduce((total, contribution) => {
-        if (contribution.currencyEntered === "AUD") {
-          return total + contribution.amount;
-        }
-        return total + contribution.amountUsd;
-      }, 0);
-    months.push({ label, value });
+  return roundMoney(
+    calculateLoggedTransactionsAud(contributions, trades, asOfDate.slice(0, 7), latestUsdToAudRate),
+  );
+}
+
+function calculateTotalLoggedAud(
+  contributions: Array<{
+    id: string;
+    date: string;
+    ledgerGroupId?: string;
+    currencyEntered: string;
+    amount: number;
+    amountUsd: number;
+  }>,
+  trades: Array<{
+    id: string;
+    date: string;
+    ledgerGroupId?: string;
+    side: "BUY" | "SELL";
+    cashOutAud?: number;
+    totalAmountUsd: number;
+  }>,
+  latestUsdToAudRate: number,
+) {
+  return roundMoney(calculateLoggedTransactionsAud(contributions, trades, undefined, latestUsdToAudRate));
+}
+
+function getLatestLoggedMonthKey(
+  contributions: Array<{
+    id: string;
+    date: string;
+    ledgerGroupId?: string;
+    currencyEntered: string;
+    amount: number;
+    amountUsd: number;
+  }>,
+  trades: Array<{
+    id: string;
+    date: string;
+    ledgerGroupId?: string;
+    side: "BUY" | "SELL";
+    cashOutAud?: number;
+    totalAmountUsd: number;
+  }>,
+) {
+  const latestContributionDate = contributions.map((item) => item.date).sort().at(-1);
+  const latestTradeDate = trades.map((item) => item.date).sort().at(-1);
+  const latestDate = [latestContributionDate, latestTradeDate].filter(Boolean).sort().at(-1);
+  return latestDate ? latestDate.slice(0, 7) : undefined;
+}
+
+function calculateLoggedTransactionsAud(
+  contributions: Array<{
+    id: string;
+    date: string;
+    ledgerGroupId?: string;
+    currencyEntered: string;
+    amount: number;
+    amountUsd: number;
+  }>,
+  trades: Array<{
+    id: string;
+    date: string;
+    ledgerGroupId?: string;
+    side: "BUY" | "SELL";
+    cashOutAud?: number;
+    totalAmountUsd: number;
+  }>,
+  month: string | undefined,
+  latestUsdToAudRate: number,
+) {
+  const totals = new Map<string, number>();
+  const matchesMonth = (date: string) => (month ? date.slice(0, 7) === month : true);
+
+  for (const contribution of contributions) {
+    if (!matchesMonth(contribution.date)) {
+      continue;
+    }
+    const key = contribution.ledgerGroupId ? `group:${contribution.ledgerGroupId}` : `contribution:${contribution.id}`;
+    if (totals.has(key)) {
+      continue;
+    }
+    const amountAud =
+      contribution.currencyEntered === "AUD"
+        ? contribution.amount
+        : contribution.amountUsd * latestUsdToAudRate;
+    totals.set(key, amountAud);
   }
 
-  const max = Math.max(...months.map((month) => month.value), 1);
-  const hasAnyValue = months.some((month) => month.value > 0);
-  const palette: Array<"blue" | "emerald" | "amber"> = [
-    "blue",
-    "blue",
-    "emerald",
-    "blue",
-    "emerald",
-    "blue",
-    "amber",
-    "blue",
-    "emerald",
-    "blue",
-  ];
+  for (const trade of trades) {
+    if (!matchesMonth(trade.date) || trade.side !== "BUY") {
+      continue;
+    }
+    const key = trade.ledgerGroupId ? `group:${trade.ledgerGroupId}` : `trade:${trade.id}`;
+    if (totals.has(key)) {
+      continue;
+    }
+    const amountAud =
+      typeof trade.cashOutAud === "number"
+        ? trade.cashOutAud
+        : latestUsdToAudRate > 0
+          ? trade.totalAmountUsd / latestUsdToAudRate
+          : trade.totalAmountUsd;
+    totals.set(key, amountAud);
+  }
+
+  return Array.from(totals.values()).reduce((sum, value) => sum + value, 0);
+}
+
+function buildRecentContributionBars(
+  contributions: Array<{
+    id: string;
+    date: string;
+    ledgerGroupId?: string;
+    currencyEntered: string;
+    amount: number;
+    amountUsd: number;
+  }>,
+  trades: Array<{
+    id: string;
+    date: string;
+    ledgerGroupId?: string;
+    side: "BUY" | "SELL";
+    cashOutAud?: number;
+    totalAmountUsd: number;
+  }>,
+  startDate: string,
+  endDateIso: string,
+  latestUsdToAudRate: number,
+) {
+  const months: Array<{ label: string; fullLabel: string; valueAud: number }> = [];
+  const monthDate = new Date(`${startDate}T00:00:00`);
+  monthDate.setDate(1);
+  const endDate = new Date(`${endDateIso}T00:00:00`);
+  endDate.setDate(1);
+  while (monthDate <= endDate) {
+    const key = format(monthDate, "yyyy-MM");
+    const label = format(monthDate, "MMMyy");
+    const fullLabel = format(monthDate, "MMMyy");
+    const valueAud = calculateLoggedTransactionsAud(contributions, trades, key, latestUsdToAudRate);
+    months.push({ label, fullLabel, valueAud });
+    monthDate.setMonth(monthDate.getMonth() + 1);
+  }
+
+  const max = Math.max(...months.map((month) => month.valueAud), 1);
+  const hasAnyValue = months.some((month) => month.valueAud > 0);
 
   return months.map((month, index) => ({
     index,
     label: month.label,
+    fullLabel: month.fullLabel,
+    valueAud: roundMoney(month.valueAud),
     height: hasAnyValue
-      ? Math.max(18, (month.value / max) * 100)
-      : [22, 30, 28, 44, 38, 56, 50, 68, 60, 74][index] ?? 24,
-    tint: palette[index] ?? "blue",
+      ? month.valueAud > 0
+        ? Math.max(4, (month.valueAud / max) * 100)
+        : 2
+      : 2,
+    tint: "blue" as const,
   }));
+}
+
+function ComparisonLineGraph({
+  benchmarkCurrentValueUsd,
+  benchmarkProjectedValueUsd,
+  portfolioCurrentValueUsd,
+  portfolioProjectedValueUsd,
+  months,
+}: {
+  benchmarkCurrentValueUsd: number;
+  benchmarkProjectedValueUsd: number;
+  portfolioCurrentValueUsd: number;
+  portfolioProjectedValueUsd: number;
+  months: number;
+}) {
+  const steps = Math.max(1, months);
+  const width = 560;
+  const height = 144;
+  const paddingX = 12;
+  const paddingTop = 10;
+  const paddingBottom = 22;
+  const chartWidth = width - paddingX * 2;
+  const chartHeight = height - paddingTop - paddingBottom;
+  const maxValue = Math.max(
+    benchmarkCurrentValueUsd,
+    benchmarkProjectedValueUsd,
+    portfolioCurrentValueUsd,
+    portfolioProjectedValueUsd,
+    1,
+  );
+
+  const points = Array.from({ length: steps + 1 }, (_, index) => {
+    const progress = index / steps;
+    return {
+      index,
+      benchmark:
+        benchmarkCurrentValueUsd +
+        (benchmarkProjectedValueUsd - benchmarkCurrentValueUsd) * progress,
+      portfolio:
+        portfolioCurrentValueUsd +
+        (portfolioProjectedValueUsd - portfolioCurrentValueUsd) * progress,
+    };
+  });
+
+  const scaleX = (index: number) => paddingX + (index / steps) * chartWidth;
+  const scaleY = (value: number) => paddingTop + (1 - value / maxValue) * chartHeight;
+
+  const benchmarkPath = points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${scaleX(point.index)} ${scaleY(point.benchmark)}`)
+    .join(" ");
+  const portfolioPath = points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${scaleX(point.index)} ${scaleY(point.portfolio)}`)
+    .join(" ");
+  const majorTicks = [0, Math.floor(steps / 4), Math.floor(steps / 2), Math.floor((steps * 3) / 4), steps]
+    .filter((tick, index, array) => array.indexOf(tick) === index)
+    .sort((left, right) => left - right);
+
+  return (
+    <svg
+      aria-label="Portfolio versus benchmark line graph"
+      className="block h-[180px] w-full"
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+    >
+      {Array.from({ length: steps + 1 }, (_, index) => {
+        const x = scaleX(index);
+        const isMajor = majorTicks.includes(index);
+        return (
+          <line
+            key={`tick-${index}`}
+            x1={x}
+            x2={x}
+            y1={height - paddingBottom - (isMajor ? 10 : 6)}
+            y2={height - paddingBottom}
+            stroke={isMajor ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.08)"}
+            strokeWidth={1}
+          />
+        );
+      })}
+
+      <line
+        x1={paddingX}
+        x2={width - paddingX}
+        y1={height - paddingBottom}
+        y2={height - paddingBottom}
+        stroke="rgba(255,255,255,0.12)"
+        strokeWidth={1}
+      />
+
+      <path d={benchmarkPath} fill="none" stroke="#60a5fa" strokeWidth={2.5} />
+      <path d={portfolioPath} fill="none" stroke="#4ade80" strokeWidth={2.5} />
+
+      {majorTicks.map((tick) => (
+        <text
+          key={`label-${tick}`}
+          x={scaleX(tick)}
+          y={height - 8}
+          fill="rgba(226,232,240,0.72)"
+          fontSize="9"
+          textAnchor={tick === 0 ? "start" : tick === steps ? "end" : "middle"}
+        >
+          {tick}
+        </text>
+      ))}
+
+      <circle
+        cx={scaleX(steps)}
+        cy={scaleY(benchmarkProjectedValueUsd)}
+        r={4}
+        fill="#60a5fa"
+        stroke="rgba(15,23,42,0.95)"
+        strokeWidth={2}
+      />
+      <circle
+        cx={scaleX(steps)}
+        cy={scaleY(portfolioProjectedValueUsd)}
+        r={4}
+        fill="#4ade80"
+        stroke="rgba(15,23,42,0.95)"
+        strokeWidth={2}
+      />
+    </svg>
+  );
 }

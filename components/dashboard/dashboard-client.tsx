@@ -47,11 +47,15 @@ import {
   calculateDepositGuide,
   type DepositGuideNewsInput,
 } from "@/lib/domain/depositGuide";
-import { formatDisplayDate, todayIso } from "@/lib/domain/dates";
+import { formatDisplayDate, monthsElapsedInclusive, todayIso } from "@/lib/domain/dates";
 import { buildAiNewsDigest } from "@/lib/ai/articleAnalysis";
 import { getCompanyReviewProfile } from "@/lib/news/companyReviewProfiles";
 import { isRelevantNewsArticle } from "@/lib/news/relevance";
-import { scoreCodexReviewForComparison } from "@/lib/news/codexReviewRanking";
+import {
+  COMPARISON_HIGH_CONFIDENCE_THRESHOLD,
+  comparisonScoreToPercent,
+  scoreCodexReviewForComparison,
+} from "@/lib/news/codexReviewRanking";
 import { buildNewsDigest } from "@/lib/news/sentiment";
 import { REVIEWER_SPEC_VERSION, type ReviewerContextOverride } from "@/lib/news/reviewerSpec";
 import { projectCatchUp } from "@/lib/domain/projections";
@@ -67,6 +71,7 @@ import {
   projectStudyLoanDebtRange,
 } from "@/lib/domain/studyLoan";
 import { useTrackerData } from "@/lib/storage/useTrackerData";
+import { withTimeout } from "@/lib/utils/async";
 import type { CachedDailyPrice, CachedNewsArticle, CachedQuote } from "@/lib/storage/types";
 import { cn } from "@/lib/utils";
 
@@ -154,7 +159,7 @@ type ReviewerDraft = {
   materialityKeywords: string;
 };
 
-const COMPARISON_SYMBOLS = ["AAPL", "NVDA", "AMZN", "TSLA", "SPACEX"] as const;
+const COMPARISON_SYMBOLS = ["AAPL", "NVDA", "AMZN", "TSLA", "SPCX"] as const;
 
 export function DashboardClient() {
   const tracker = useTrackerData();
@@ -365,9 +370,20 @@ export function DashboardClient() {
             symbol,
             reviewMonth: codexReviewMonth,
           });
-          const response = await fetch(`/api/codex-review-bundle?${params.toString()}`, {
-            cache: "no-store",
-          });
+          const response = await withTimeout(
+            fetch(`/api/codex-review-bundle?${params.toString()}`, {
+              cache: "no-store",
+            }),
+            7000,
+          );
+          if (!response) {
+            return {
+              symbol,
+              reviewMonth: codexReviewMonth,
+              status: "missing" as const,
+              rankScore: -999,
+            };
+          }
           if (!response.ok) {
             return {
               symbol,
@@ -534,6 +550,12 @@ export function DashboardClient() {
     asOfDate: todayIso(),
     planStartDate: settings.planStartDate,
     news: guideNewsDigest,
+    expectedAdjustmentPercent:
+      codexReviewLookup?.lookupKey === codexReviewLookupKey
+        ? codexReviewLookup.review?.suggestedGuideImpact?.expectedAdjustmentPercent
+        : compareReviewExpectedAdjustmentPercent(
+            selectedComparisonReview ?? bestComparisonReview,
+          ),
   });
   const reviewSummarySource = bestComparisonReview?.codexReview
     ? {
@@ -608,7 +630,7 @@ export function DashboardClient() {
   if (!saleEvent) {
     return (
       <AppShell
-        title="Create Your Rebuild Hub"
+        title="Create dashboard"
         subtitle="Enter the original AAPL sale details or load demo data to explore the app first."
       >
         <Card>
@@ -673,6 +695,16 @@ export function DashboardClient() {
     todayIso(),
     latestUsdToAudRate,
   );
+  const loggedToDateAud = metrics.actualContributionsAud;
+  const completedMonths = Math.max(0, monthsElapsedInclusive(settings.planStartDate, todayIso()) - 1);
+  const cumulativeTargetAud = completedMonths * settings.planMonthlyContributionAud;
+  const cumulativeGapAud = Math.max(0, cumulativeTargetAud - loggedToDateAud);
+  const cumulativeProgressPercent =
+    cumulativeTargetAud > 0
+      ? Math.min(100, (loggedToDateAud / cumulativeTargetAud) * 100)
+      : loggedToDateAud > 0
+        ? 100
+        : 0;
   const hasCurrentValuation = currentPriceUsd > 0 && metrics.hadHeldTotalValueUsd > 0;
   const schoolDecisionHadHeldUsd = hasCurrentValuation
     ? metrics.hadHeldTotalValueUsd
@@ -729,19 +761,13 @@ export function DashboardClient() {
     ? `About ${moneyUsd(Math.abs(decisionGapUsd))} at the latest USD/AUD rate.`
     : `About ${moneyAud(Math.abs(decisionGapAud))} at the latest USD/AUD rate.`;
   const isAhead = decisionGapAud <= 0;
-  const loggedProgressPercent = Math.min(Math.max(metrics.catchUpProgressPercent, 0), 100);
+  const loggedProgressPercent = Math.min(Math.max(cumulativeProgressPercent, 0), 100);
   const progressForBar = loggedProgressPercent;
   const schoolPayoffRange =
     studyLoanProjectionRange.earliestPaidOffDate && studyLoanProjectionRange.latestPaidOffDate
       ? `${formatDisplayDate(studyLoanProjectionRange.earliestPaidOffDate)} to ${formatDisplayDate(studyLoanProjectionRange.latestPaidOffDate)}`
       : "Not within 10 years";
-  const logThisMonthAmountAud =
-    depositGuide.remainingThisMonthAud > 0
-      ? depositGuide.remainingThisMonthAud
-      : depositGuide.recommendedDepositAud;
-  const logThisMonthHref = `/transactions?prefill=month&amountAud=${encodeURIComponent(
-    logThisMonthAmountAud.toFixed(2),
-  )}&targetAud=${encodeURIComponent(depositGuide.recommendedDepositAud.toFixed(2))}&date=${todayIso()}`;
+  const logThisMonthHref = "/transactions";
 
   function getReviewArticlesForSymbol(symbol: string) {
     const normalizedSymbol = symbol.toUpperCase();
@@ -1138,13 +1164,13 @@ export function DashboardClient() {
               </div>
 
                 <div className="rounded-lg border bg-background/80 p-4 lg:min-w-[260px]">
-                  <p className="text-sm font-medium text-muted-foreground">Progress</p>
+                  <p className="text-sm font-medium text-muted-foreground">12-month cycle</p>
                   <p className="mt-1 text-3xl font-semibold">
                     {formatPercent(loggedProgressPercent)}%
                   </p>
                   <Progress className="mt-3" value={progressForBar} />
                   <p className="mt-3 text-sm text-muted-foreground">
-                    Logged rebuild value compared with the Had I Held benchmark.
+                    {formatCurrency(cumulativeGapAud, "AUD")} remains to reach the cumulative target of {formatCurrency(cumulativeTargetAud, "AUD")}.
                   </p>
                 </div>
               </div>
@@ -1242,7 +1268,7 @@ export function DashboardClient() {
             }
             rows={[
               ["Shares owned", formatShares(metrics.currentRebuildShares)],
-              ["Total contributed", displayUsdValue(metrics.totalContributionsUsd)],
+              ["Stock received in USD", displayUsdValue(metrics.totalContributionsUsd)],
               ["Market value", displayUsdValue(metrics.rebuildMarketValueUsd)],
               ["Cash balance", displayUsdValue(metrics.cashBalanceUsd)],
             ]}
@@ -1485,7 +1511,7 @@ export function DashboardClient() {
             <div>
               <CardTitle>Cross-stock comparison</CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
-                Ranks your saved reviews for AAPL, TSLA, NVDA, AMZN, and SPACEX so you can see
+                Ranks your saved reviews for AAPL, TSLA, NVDA, AMZN, and SPCX so you can see
                 which one looks strongest for the current A$600 budget. Use the batch buttons to
                 prepare them all in one pass.
               </p>
@@ -1583,15 +1609,42 @@ export function DashboardClient() {
                         ? newsSignalLabel(bestComparisonReview.codexReview.appliedNewsDigest.signal)
                         : "Mixed"}
                     </Badge>
-                    <Badge variant="outline">Score {bestComparisonReview.rankScore.toFixed(2)}/5</Badge>
+                    <Badge variant="outline">Fit {bestComparisonReview.rankScore.toFixed(2)}/5</Badge>
                   </div>
                 ) : null}
               </div>
               {bestComparisonReview ? (
                 <div className="mt-3 rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
-                  The score is a signed 5-point fit score from -5 to 5, with 0 treated as neutral.
-                  It starts from the review digest score, then adds a small boost for signal,
-                  confidence, and the suggested tilt before being clipped into the -5 to 5 range.
+                  <div className="flex items-center justify-between gap-3 text-xs uppercase tracking-wide text-muted-foreground">
+                    <span>Fit scale</span>
+                    <span>High confidence starts at +2.0</span>
+                  </div>
+                  <div className="relative mt-2">
+                    <div className="h-2 overflow-hidden rounded-full bg-emerald-950/30">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-lime-400 to-emerald-300 transition-[width] duration-300"
+                        style={{ width: `${comparisonScoreToPercent(bestComparisonReview.rankScore)}%` }}
+                      />
+                    </div>
+                    <div
+                      className="absolute top-1/2 h-4 -translate-x-1/2 -translate-y-1/2"
+                      style={{ left: `${comparisonScoreToPercent(COMPARISON_HIGH_CONFIDENCE_THRESHOLD)}%` }}
+                    >
+                      <div className="h-4 w-0.5 rounded-full bg-white/90 shadow-[0_0_0_1px_rgba(16,185,129,0.45)]" />
+                      <div className="absolute left-1/2 top-[-0.3rem] h-2 w-2 -translate-x-1/2 rounded-full border border-white/80 bg-emerald-400 shadow-sm" />
+                    </div>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span>-5 weaker</span>
+                    <span>0 neutral</span>
+                    <span>+5 stronger</span>
+                  </div>
+                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground/90">
+                    The score is a signed 5-point fit score from -5 to 5, with 0 treated as
+                    neutral. It starts from the review digest score, then adds boosts for signal,
+                    confidence, and the suggested tilt before a soft calibration curve turns it
+                    into a readable human score.
+                  </p>
                 </div>
               ) : null}
             </div>
@@ -1618,7 +1671,7 @@ export function DashboardClient() {
                           {digest?.signal ? newsSignalLabel(digest.signal) : item.status === "prepared" ? "Ready" : "Pending"}
                         </Badge>
                         <Badge variant="outline">
-                          {item.status === "prepared" && !digest ? "Bundle ready" : `Score ${item.rankScore.toFixed(2)}/5`}
+                          {item.status === "prepared" && !digest ? "Bundle ready" : `Fit ${item.rankScore.toFixed(2)}/5`}
                         </Badge>
                       </div>
                     </div>
@@ -1796,7 +1849,7 @@ export function DashboardClient() {
             <ChartBlock title="Had I Held vs Rebuild Portfolio">
               <ValueLineChart data={series} />
             </ChartBlock>
-            <ChartBlock title="AAPL rebuild gap over time">
+            <ChartBlock title="Catch-up gap over time">
               <GapAreaChart data={series} />
             </ChartBlock>
             <ChartBlock title="Contributions vs Portfolio Gain">
@@ -1808,14 +1861,14 @@ export function DashboardClient() {
             <ChartBlock title="Projection Snapshot">
               <div className="grid gap-3 sm:grid-cols-2">
                 <PlainMetric
-                  label="4-year AAPL-only gap"
+                  label="4-year catch-up gap"
                   value={fourYearGapText}
-                  note={projection4.catchUpDate ? `AAPL-only catch-up date ${formatDisplayDate(projection4.catchUpDate)}.` : "No AAPL-only catch-up date in this window."}
+                  note={projection4.catchUpDate ? `Catch-up date ${formatDisplayDate(projection4.catchUpDate)}.` : "No catch-up date in this window."}
                 />
                 <PlainMetric
-                  label="5-year AAPL-only gap"
+                  label="5-year catch-up gap"
                   value={fiveYearGapText}
-                  note={projection5.catchUpDate ? `AAPL-only catch-up date ${formatDisplayDate(projection5.catchUpDate)}.` : "No AAPL-only catch-up date in this window."}
+                  note={projection5.catchUpDate ? `Catch-up date ${formatDisplayDate(projection5.catchUpDate)}.` : "No catch-up date in this window."}
                 />
               </div>
             </ChartBlock>
@@ -1824,7 +1877,7 @@ export function DashboardClient() {
 
         <DetailsPanel
           title="Market data and assumptions"
-          description={`AAPL price is ${quoteLabel}; refresh only when you need a current value.`}
+          description={`${settings.baseTicker} price is ${quoteLabel}; refresh only when you need a current value.`}
         >
           <div className="space-y-4">
             <MarketDataStatus
@@ -1843,11 +1896,11 @@ export function DashboardClient() {
             <div className="grid gap-3 md:grid-cols-3">
               <Factor
                 icon={<CircleDollarSign className="h-4 w-4" />}
-                text="AAPL trades in USD, so the main comparison stays USD-based."
+                text="The selected ticker trades in USD, so the main comparison stays USD-based."
               />
               <Factor
                 icon={<TrendingUp className="h-4 w-4" />}
-                text="If AAPL rises quickly, the Had I Held benchmark rises too."
+                text="If the selected ticker rises quickly, the Had I Held benchmark rises too."
               />
               <Factor
                 icon={<Wallet className="h-4 w-4" />}
@@ -1988,7 +2041,7 @@ function articleReviewTimestamp(article: {
   cachedAt?: string;
   publishedAt?: string;
 }) {
-  return article.collectedAt || article.cachedAt || article.publishedAt || "";
+  return article.cachedAt || article.collectedAt || article.publishedAt || "";
 }
 
 function articleDisplayTimestamp(article: {
@@ -2032,7 +2085,7 @@ function buildGuideReviewSummary({
     bestComparisonReview
       ? `${reviewSymbol} is the active comparison ticket at ${bestComparisonReview.rankScore.toFixed(
           2,
-        )}/5 fit score. In the signed 5-point framing, 0 is neutral, higher is a stronger fit, and lower is weaker.`
+        )}/5 fit score. In the signed 5-point framing, 0 is neutral, higher is a stronger fit, and lower is weaker. The green bar marks the start of the strong-positive band at +2.0.`
       : `Guide score ${guide.signalScore.toFixed(
           2,
         )} is an internal tilt score, not a percent. In the 10-point framing, 5.0 is neutral, higher leans into a bigger monthly deposit, and lower leans into a lighter month. This score produced ${formatSignedPercent(
@@ -2099,6 +2152,28 @@ function reviewerDraftStorageKey(symbol: string) {
 
 function selectedComparisonSymbolStorageKey() {
   return "codex-comparison-ticket";
+}
+
+function compareReviewExpectedAdjustmentPercent(
+  review?:
+    | {
+        rankScore: number;
+        codexReview?: {
+          suggestedGuideImpact?: {
+            expectedAdjustmentPercent?: number;
+          };
+        };
+      }
+    | undefined,
+) {
+  if (typeof review?.rankScore === "number" && Number.isFinite(review.rankScore)) {
+    return Math.min(20, Math.max(-20, Math.round(review.rankScore * 4)));
+  }
+  const explicit = review?.codexReview?.suggestedGuideImpact?.expectedAdjustmentPercent;
+  if (typeof explicit === "number") {
+    return Math.min(20, Math.max(-20, explicit));
+  }
+  return undefined;
 }
 
 function loadSelectedComparisonSymbol() {

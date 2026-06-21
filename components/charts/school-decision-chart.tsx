@@ -28,7 +28,7 @@ export function SchoolDecisionChart({ data }: { data: SchoolDecisionMonth[] }) {
             <p className="font-semibold">{formatDisplayDate(activePoint.date)}</p>
           </div>
           <div>
-            <p className="text-xs font-medium uppercase text-muted-foreground">Keep AAPL net</p>
+            <p className="text-xs font-medium uppercase text-muted-foreground">Keep net</p>
             <p className="font-semibold">{formatCurrency(activePoint.keepAaplNetAud, "AUD")}</p>
           </div>
           <div>
@@ -72,7 +72,7 @@ export function SchoolDecisionChart({ data }: { data: SchoolDecisionMonth[] }) {
             <Tooltip
               formatter={(value: unknown, name) => {
                 const labels: Record<string, string> = {
-                  keepAaplNetAud: "Keep AAPL + Pay Debt",
+                  keepAaplNetAud: "Keep + Pay Debt",
                   cashOutRebuildNetAud: "Pay Off + Rebuild",
                 };
                 return [

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addMonths, format, parseISO } from "date-fns";
@@ -47,6 +47,17 @@ const CORE_SNAPSHOT_STORAGE_KEY = "aaplCatchUpTracker:coreSnapshot";
 const MIN_PRICE_HISTORY_POINTS = 7;
 const MAX_PRICE_HISTORY_AGE_DAYS = 7;
 const PRICE_HISTORY_LOOKBACK_MONTHS = 7;
+const TICKER_ALIASES: Record<string, string> = {
+  SPACEX: "SPCX",
+};
+
+function normalizeTickerSymbol(symbol?: string) {
+  if (!symbol) {
+    return symbol;
+  }
+  const upper = symbol.toUpperCase();
+  return TICKER_ALIASES[upper] || upper;
+}
 
 function notifyTrackerDataChanged() {
   if (typeof window !== "undefined") {
@@ -81,8 +92,73 @@ function emptySnapshot(): TrackerSnapshot {
   };
 }
 
+function normalizeTrackerSnapshot(snapshot: Partial<TrackerSnapshot>): TrackerSnapshot {
+  return {
+    ...emptySnapshot(),
+    ...snapshot,
+    settings: snapshot.settings
+      ? {
+          ...snapshot.settings,
+          baseTicker: normalizeTickerSymbol(snapshot.settings.baseTicker) || snapshot.settings.baseTicker,
+        }
+      : undefined,
+    saleEvents: (snapshot.saleEvents || []).map((saleEvent) => ({
+      ...saleEvent,
+      ticker: normalizeTickerSymbol(saleEvent.ticker) || saleEvent.ticker,
+    })),
+    contributions: snapshot.contributions || [],
+    trades: (snapshot.trades || []).map((trade) => ({
+      ...trade,
+      ticker: normalizeTickerSymbol(trade.ticker) || trade.ticker,
+    })),
+    quotes: (snapshot.quotes || []).map((quote) => ({
+      ...quote,
+      symbol: normalizeTickerSymbol(quote.symbol) || quote.symbol,
+    })),
+    dailyPrices: (snapshot.dailyPrices || []).map((price) => ({
+      ...price,
+      symbol: normalizeTickerSymbol(price.symbol) || price.symbol,
+    })),
+    dividends: (snapshot.dividends || []).map((dividend) => ({
+      ...dividend,
+      symbol: normalizeTickerSymbol(dividend.symbol) || dividend.symbol,
+    })),
+    splits: (snapshot.splits || []).map((split) => ({
+      ...split,
+      symbol: normalizeTickerSymbol(split.symbol) || split.symbol,
+    })),
+    fxRates: snapshot.fxRates || [],
+    newsArticles: (snapshot.newsArticles || []).map((article) => ({
+      ...article,
+      symbol: normalizeTickerSymbol(article.symbol) || article.symbol,
+    })),
+    newsAnalyses: (snapshot.newsAnalyses || []).map((analysis) => ({
+      ...analysis,
+      symbol: normalizeTickerSymbol(analysis.symbol) || analysis.symbol,
+    })),
+  };
+}
+
+function getCoreSnapshotUpdatedAt(snapshot: Partial<TrackerSnapshot>) {
+  const timestamps = [
+    snapshot.settings?.updatedAt,
+    ...(snapshot.saleEvents || []).map((item) => item.updatedAt),
+    ...(snapshot.contributions || []).map((item) => item.updatedAt),
+    ...(snapshot.trades || []).map((item) => item.updatedAt),
+  ]
+    .map((value) => (value ? Date.parse(value) : Number.NaN))
+    .filter((value) => Number.isFinite(value));
+
+  return timestamps.length ? Math.max(...timestamps) : 0;
+}
+
 function hasCoreTrackerData(snapshot: Partial<TrackerSnapshot>) {
-  return Boolean(snapshot.settings && (snapshot.saleEvents?.length || 0) > 0);
+  return Boolean(
+    snapshot.settings &&
+      ((snapshot.saleEvents?.length || 0) > 0 ||
+        (snapshot.contributions?.length || 0) > 0 ||
+        (snapshot.trades?.length || 0) > 0),
+  );
 }
 
 function pickCoreTrackerSnapshot(snapshot: TrackerSnapshot): Partial<TrackerSnapshot> {
@@ -128,6 +204,7 @@ type QuickTradeInput = {
 type ContributionWithPurchaseInput = {
   contribution: Omit<Contribution, "id" | "createdAt" | "updatedAt" | "amountUsd">;
   purchase?: {
+    ticker?: string;
     shares: number;
     pricePerShareUsd: number;
     fees: number;
@@ -196,7 +273,7 @@ type SharedTrackerSnapshotResponse = {
   message?: string;
 };
 
-type TrackerSyncState = {
+export type TrackerSyncState = {
   state: "loading" | "syncing" | "synced" | "local" | "empty" | "error";
   label: string;
   detail?: string;
@@ -358,6 +435,22 @@ function priceHistoryStartDate(saleDate: string | undefined, asOfDate: string) {
   return saleDate < lookbackDate ? saleDate : lookbackDate;
 }
 
+function collectTrackedSymbols(baseSymbol: string, trades: Trade[]) {
+  return Array.from(
+    new Set([
+      baseSymbol.toUpperCase(),
+      ...trades.map((trade) => trade.ticker.toUpperCase()).filter(Boolean),
+    ]),
+  );
+}
+
+function firstTradeDateForSymbol(trades: Trade[], symbol: string) {
+  return trades
+    .filter((trade) => trade.ticker.toUpperCase() === symbol.toUpperCase())
+    .map((trade) => trade.date)
+    .sort((left, right) => left.localeCompare(right))[0];
+}
+
 async function saveNewsRefresh({
   data,
   symbol,
@@ -480,16 +573,33 @@ async function fetchAndStoreNewsArticles({
   return result;
 }
 
-export function useTrackerData() {
-  const [snapshot, setSnapshot] = useState<TrackerSnapshot>(emptySnapshot());
-  const [isLoading, setIsLoading] = useState(true);
+export function useTrackerData(options?: {
+  initialSnapshot?: Partial<TrackerSnapshot>;
+  initialSyncState?: TrackerSyncState;
+  initialDisplayCurrency?: Currency;
+}) {
+  const initialSnapshot =
+    options?.initialSnapshot && hasCoreTrackerData(options.initialSnapshot)
+      ? normalizeTrackerSnapshot(options.initialSnapshot)
+      : emptySnapshot();
+  const [snapshot, setSnapshot] = useState<TrackerSnapshot>(initialSnapshot);
+  const [isLoading, setIsLoading] = useState(!options?.initialSnapshot);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [warning, setWarning] = useState<string | undefined>();
   const [lastNewsRefreshAt, setLastNewsRefreshAt] = useState<string | undefined>();
-  const [syncState, setSyncState] = useState<TrackerSyncState>({
-    state: "loading",
-    label: "Checking sync",
-  });
+  const [syncState, setSyncState] = useState<TrackerSyncState>(
+    options?.initialSyncState ??
+      (options?.initialSnapshot && hasCoreTrackerData(options.initialSnapshot)
+        ? {
+            state: "synced",
+            label: "Synced",
+            detail: "Loaded from shared storage.",
+          }
+        : {
+            state: "loading",
+            label: "Checking sync",
+          }),
+  );
   const lastSyncedCoreSnapshotRef = useRef<string>("");
 
   const syncCoreSnapshot = useCallback(
@@ -561,11 +671,20 @@ export function useTrackerData() {
       fetchSharedTrackerSnapshot(),
       indexedDbAdapter.getSnapshot(),
     ]);
+    const normalizedNext = normalizeTrackerSnapshot(next);
 
-    if (shared?.enabled && shared.snapshot && hasCoreTrackerData(shared.snapshot)) {
-      await indexedDbAdapter.importSnapshot(shared.snapshot as TrackerSnapshot);
+    if (
+      shared?.enabled &&
+      shared.snapshot &&
+      hasCoreTrackerData(shared.snapshot) &&
+      getCoreSnapshotUpdatedAt(normalizedNext) <= getCoreSnapshotUpdatedAt(shared.snapshot)
+    ) {
+      await indexedDbAdapter.importSnapshot({
+        ...normalizedNext,
+        ...(shared.snapshot as TrackerSnapshot),
+      });
       const hydrated = await indexedDbAdapter.getSnapshot();
-      setSnapshot(hydrated);
+      setSnapshot(normalizeTrackerSnapshot(hydrated));
       lastSyncedCoreSnapshotRef.current = JSON.stringify(pickCoreTrackerSnapshot(hydrated));
       setSyncState({
         state: "synced",
@@ -577,7 +696,7 @@ export function useTrackerData() {
       return;
     }
 
-    const localBackup = hasCoreTrackerData(next) ? next : loadLocalCoreSnapshot();
+    const localBackup = hasCoreTrackerData(normalizedNext) ? normalizedNext : loadLocalCoreSnapshot();
     if (localBackup && hasCoreTrackerData(localBackup)) {
       if (shared?.message) {
         setSyncState({
@@ -599,10 +718,10 @@ export function useTrackerData() {
         });
       }
 
-      if (!hasCoreTrackerData(next)) {
+      if (!hasCoreTrackerData(normalizedNext)) {
         await indexedDbAdapter.importSnapshot(localBackup as TrackerSnapshot);
         const hydrated = await indexedDbAdapter.getSnapshot();
-        setSnapshot(hydrated);
+        setSnapshot(normalizeTrackerSnapshot(hydrated));
         setIsLoading(false);
         return;
       }
@@ -620,8 +739,8 @@ export function useTrackerData() {
       });
     }
 
-    setSnapshot(next);
-    if (hasCoreTrackerData(next)) {
+    setSnapshot(normalizeTrackerSnapshot(normalizedNext));
+    if (hasCoreTrackerData(normalizedNext)) {
       setSyncState((current) =>
         current.state === "synced" || current.state === "syncing" || current.state === "local"
           ? current
@@ -803,7 +922,7 @@ export function useTrackerData() {
         trades: [],
       });
       await load();
-      toast.success("Rebuild Hub created");
+      toast.success("Planner created");
     },
     [load, syncCoreSnapshot],
   );
@@ -837,19 +956,23 @@ export function useTrackerData() {
   const addContributionWithPurchase = useCallback(
     async (input: ContributionWithPurchaseInput) => {
       const now = nowIso();
+      const ledgerGroupId = uid("ledger");
       const amountUsd =
         input.contribution.currencyEntered === "USD"
           ? input.contribution.amount
           : roundMoney(input.contribution.amount * input.contribution.fxRateToUsd);
 
-      await indexedDbAdapter.saveContribution({
+      const contribution: Contribution = {
         ...input.contribution,
+        ledgerGroupId,
         id: uid("contribution"),
         amountUsd,
         createdAt: now,
         updatedAt: now,
-      });
+      };
+      await indexedDbAdapter.saveContribution(contribution);
 
+      let trade: Trade | undefined;
       if (input.purchase && input.purchase.shares > 0 && input.purchase.pricePerShareUsd > 0) {
         const feeUsd =
           input.purchase.feeCurrency === "AUD"
@@ -858,11 +981,13 @@ export function useTrackerData() {
         const grossAmountUsd = roundMoney(
           input.purchase.shares * input.purchase.pricePerShareUsd,
         );
+        const tradeId = uid("trade");
 
-        await indexedDbAdapter.saveTrade({
-          id: uid("trade"),
+        trade = {
+          id: tradeId,
+          ledgerGroupId,
           date: input.contribution.date,
-          ticker: settings.baseTicker,
+          ticker: input.purchase.ticker || settings.baseTicker,
           side: "BUY",
           shares: input.purchase.shares,
           pricePerShare: input.purchase.pricePerShareUsd,
@@ -876,13 +1001,26 @@ export function useTrackerData() {
           notes: input.purchase.notes || input.contribution.notes,
           createdAt: now,
           updatedAt: now,
-        });
+          cashOutAud: input.contribution.currencyEntered === "AUD" ? input.contribution.amount : undefined,
+        };
+
+        await indexedDbAdapter.saveTrade(trade);
       }
 
-      await load();
-      toast.success(input.purchase ? "Contribution and AAPL buy added" : "Contribution added");
+      const nextSnapshot = normalizeTrackerSnapshot({
+        ...snapshot,
+        contributions: [...snapshot.contributions, contribution],
+        trades: trade ? [...snapshot.trades, trade] : snapshot.trades,
+      });
+      setSnapshot(nextSnapshot);
+      await syncCoreSnapshot(pickCoreTrackerSnapshot(nextSnapshot));
+      toast.success(
+        input.purchase
+          ? `Contribution and ${(input.purchase.ticker || settings.baseTicker).toUpperCase()} buy added`
+          : "Contribution added",
+      );
     },
-    [load, settings.baseTicker],
+    [setSnapshot, snapshot, syncCoreSnapshot, settings.baseTicker],
   );
 
   const saveSaleEvent = useCallback(
@@ -909,16 +1047,22 @@ export function useTrackerData() {
   const addTrade = useCallback(
     async (input: Omit<Trade, "id" | "createdAt" | "updatedAt">) => {
       const now = nowIso();
-      await indexedDbAdapter.saveTrade({
+      const trade: Trade = {
         ...input,
         id: uid("trade"),
         createdAt: now,
         updatedAt: now,
+      };
+      await indexedDbAdapter.saveTrade(trade);
+      const nextSnapshot = normalizeTrackerSnapshot({
+        ...snapshot,
+        trades: [...snapshot.trades, trade],
       });
-      await load();
+      setSnapshot(nextSnapshot);
+      await syncCoreSnapshot(pickCoreTrackerSnapshot(nextSnapshot));
       toast.success(`${input.side === "BUY" ? "Buy" : "Sell"} logged`);
     },
-    [load],
+    [setSnapshot, snapshot, syncCoreSnapshot],
   );
 
   const addQuickTrade = useCallback(
@@ -975,32 +1119,129 @@ export function useTrackerData() {
 
   const deleteContribution = useCallback(
     async (id: string) => {
-      await indexedDbAdapter.deleteContribution(id);
-      await load();
-      toast.success("Contribution deleted");
+      const target = snapshot.contributions.find((contribution) => contribution.id === id);
+      const matchingTrade =
+        target && !target.ledgerGroupId
+          ? snapshot.trades.find(
+              (trade) =>
+                trade.date === target.date &&
+                Math.abs((trade.cashOutAud ?? 0) - target.amount) < 0.01 &&
+                (trade.notes || "") === (target.notes || ""),
+            )
+          : undefined;
+      const tradeIdsToDelete = snapshot.trades
+        .filter(
+          (trade) =>
+            trade.ledgerGroupId === target?.ledgerGroupId ||
+            (matchingTrade ? trade.id === matchingTrade.id : false),
+        )
+        .map((trade) => trade.id);
+      const contributionIdsToDelete = snapshot.contributions
+        .filter(
+          (contribution) =>
+            contribution.id === id ||
+            contribution.ledgerGroupId === target?.ledgerGroupId,
+        )
+        .map((contribution) => contribution.id);
+      await Promise.all([
+        ...tradeIdsToDelete.map((tradeId) => indexedDbAdapter.deleteTrade(tradeId)),
+        ...contributionIdsToDelete.map((contributionId) =>
+          indexedDbAdapter.deleteContribution(contributionId),
+        ),
+      ]);
+      const nextSnapshot = normalizeTrackerSnapshot({
+        ...snapshot,
+        contributions: snapshot.contributions.filter(
+          (contribution) =>
+            !contributionIdsToDelete.includes(contribution.id) &&
+            contribution.ledgerGroupId !== target?.ledgerGroupId,
+        ),
+        trades: snapshot.trades.filter(
+          (trade) =>
+            !tradeIdsToDelete.includes(trade.id) &&
+            trade.ledgerGroupId !== target?.ledgerGroupId,
+        ),
+      });
+      setSnapshot(nextSnapshot);
+      await syncCoreSnapshot(pickCoreTrackerSnapshot(nextSnapshot));
+      toast.success(target?.ledgerGroupId ? "Ledger entry deleted" : "Contribution deleted");
     },
-    [load],
+    [setSnapshot, snapshot, syncCoreSnapshot],
   );
 
   const deleteTrade = useCallback(
     async (id: string) => {
-      await indexedDbAdapter.deleteTrade(id);
-      await load();
-      toast.success("Trade deleted");
+      const target = snapshot.trades.find((trade) => trade.id === id);
+      const matchingContribution =
+        target && !target.ledgerGroupId
+          ? snapshot.contributions.find(
+              (contribution) =>
+                contribution.date === target.date &&
+                Math.abs(contribution.amount - (target.cashOutAud ?? contribution.amount)) < 0.01 &&
+                (contribution.notes || "") === (target.notes || ""),
+            )
+          : undefined;
+      const tradeIdsToDelete = snapshot.trades
+        .filter(
+          (trade) =>
+            trade.id === id ||
+            trade.ledgerGroupId === target?.ledgerGroupId ||
+            (matchingContribution ? trade.id === target?.id : false),
+        )
+        .map((trade) => trade.id);
+      const contributionIdsToDelete = snapshot.contributions
+        .filter(
+          (contribution) =>
+            contribution.ledgerGroupId === target?.ledgerGroupId ||
+            (matchingContribution ? contribution.id === matchingContribution.id : false),
+        )
+        .map((contribution) => contribution.id);
+      await Promise.all([
+        ...tradeIdsToDelete.map((tradeId) => indexedDbAdapter.deleteTrade(tradeId)),
+        ...contributionIdsToDelete.map((contributionId) =>
+          indexedDbAdapter.deleteContribution(contributionId),
+        ),
+      ]);
+      const nextSnapshot = normalizeTrackerSnapshot({
+        ...snapshot,
+        contributions: snapshot.contributions.filter(
+          (contribution) =>
+            !contributionIdsToDelete.includes(contribution.id) &&
+            contribution.ledgerGroupId !== target?.ledgerGroupId,
+        ),
+        trades: snapshot.trades.filter(
+          (trade) =>
+            !tradeIdsToDelete.includes(trade.id) &&
+            trade.ledgerGroupId !== target?.ledgerGroupId,
+        ),
+      });
+      setSnapshot(nextSnapshot);
+      await syncCoreSnapshot(pickCoreTrackerSnapshot(nextSnapshot));
+      toast.success(target?.ledgerGroupId ? "Ledger entry deleted" : "Trade deleted");
     },
-    [load],
+    [setSnapshot, snapshot, syncCoreSnapshot],
   );
+
+  const resetLedger = useCallback(async () => {
+    const clearedSnapshot = normalizeTrackerSnapshot({
+      ...snapshot,
+      contributions: [],
+      trades: [],
+    });
+    await indexedDbAdapter.importSnapshot(clearedSnapshot);
+    setSnapshot(clearedSnapshot);
+    await syncCoreSnapshot(pickCoreTrackerSnapshot(clearedSnapshot));
+    toast.success("Ledger reset");
+  }, [setSnapshot, snapshot, syncCoreSnapshot]);
 
   const refreshMarketData = useCallback(
     async (force = false, options?: { silent?: boolean }) => {
       const activeSale = snapshot.saleEvents[0];
       const symbol = settings.baseTicker || "AAPL";
       const asOfDate = todayIso();
-      const hasFreshPriceHistory = hasUsablePriceHistory(
-        snapshot.dailyPrices,
-        symbol,
-        asOfDate,
-        allowManualMarketData,
+      const trackedSymbols = collectTrackedSymbols(symbol, snapshot.trades);
+      const hasFreshPriceHistory = trackedSymbols.every((trackedSymbol) =>
+        hasUsablePriceHistory(snapshot.dailyPrices, trackedSymbol, asOfDate, allowManualMarketData),
       );
       if (
         !force &&
@@ -1018,6 +1259,7 @@ export function useTrackerData() {
       const historyFrom = priceHistoryStartDate(activeSale?.saleDate, asOfDate);
       const eventFrom = activeSale?.saleDate || historyFrom;
       const to = asOfDate;
+      const extraSymbols = trackedSymbols.filter((trackedSymbol) => trackedSymbol !== symbol);
 
       try {
         const [
@@ -1069,6 +1311,48 @@ export function useTrackerData() {
           await indexedDbAdapter.saveDailyPrices(prices);
         } else {
           hadRefreshIssue = true;
+        }
+
+        if (extraSymbols.length > 0) {
+          const extraHistoryResults = await Promise.allSettled(
+            extraSymbols.map(async (trackedSymbol) => {
+              const firstTradeDate = firstTradeDateForSymbol(snapshot.trades, trackedSymbol);
+              const from = priceHistoryStartDate(firstTradeDate, asOfDate);
+              const response = await fetch(
+                `/api/market/history?symbol=${trackedSymbol}&from=${from}&to=${to}&provider=${settings.marketDataProvider}`,
+              );
+              if (!response.ok) {
+                return {
+                  symbol: trackedSymbol,
+                  prices: [] as CachedDailyPrice[],
+                  ok: false as const,
+                };
+              }
+
+              const data = (await response.json()) as { prices?: MarketHistoryApiPrice[] };
+              const prices = ((data.prices || []) as MarketHistoryApiPrice[]).map((price) => ({
+                symbol: price.symbol,
+                date: price.date,
+                closeUsd: price.close,
+                adjustedCloseUsd: price.adjustedClose,
+                provider: price.provider,
+                raw: price,
+              }));
+              return {
+                symbol: trackedSymbol,
+                prices,
+                ok: true as const,
+              };
+            }),
+          );
+
+          for (const result of extraHistoryResults) {
+            if (result.status === "fulfilled" && result.value.ok) {
+              await indexedDbAdapter.saveDailyPrices(result.value.prices);
+            } else {
+              hadRefreshIssue = true;
+            }
+          }
         }
 
         if (dividendResponse.status === "fulfilled" && dividendResponse.value.ok) {
@@ -1181,8 +1465,52 @@ export function useTrackerData() {
       snapshot.newsAnalyses,
       snapshot.newsArticles,
       snapshot.saleEvents,
+      snapshot.trades,
     ],
   );
+
+  const marketRefreshAttemptKey = useMemo(
+    () =>
+      [
+        settings.baseTicker,
+        ...snapshot.trades.map((trade) => `${trade.ticker}:${trade.date}:${trade.side}:${trade.shares}`),
+      ].join("|"),
+    [settings.baseTicker, snapshot.trades],
+  );
+  const marketRefreshAttemptRef = useRef<string>("");
+
+  useEffect(() => {
+    if (isLoading || isRefreshing) {
+      return;
+    }
+
+    const trackedSymbols = collectTrackedSymbols(settings.baseTicker || "AAPL", snapshot.trades);
+    const missingHistory = trackedSymbols.some(
+      (trackedSymbol) =>
+        !hasUsablePriceHistory(
+          snapshot.dailyPrices,
+          trackedSymbol,
+          todayIso(),
+          allowManualMarketData,
+        ),
+    );
+
+    if (!missingHistory || marketRefreshAttemptRef.current === marketRefreshAttemptKey) {
+      return;
+    }
+
+    marketRefreshAttemptRef.current = marketRefreshAttemptKey;
+    void refreshMarketData(false, { silent: true });
+  }, [
+    allowManualMarketData,
+    isLoading,
+    isRefreshing,
+    marketRefreshAttemptKey,
+    refreshMarketData,
+    snapshot.dailyPrices,
+    snapshot.trades,
+    settings.baseTicker,
+  ]);
 
   const refreshNewsArticles = useCallback(
     async (symbolInput?: string) => {
@@ -1342,6 +1670,7 @@ export function useTrackerData() {
     addQuickTrade,
     deleteContribution,
     deleteTrade,
+    resetLedger,
     refreshMarketData,
     refreshNewsArticles,
     refreshNewsArticlesForSymbols,
