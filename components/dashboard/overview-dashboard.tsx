@@ -493,7 +493,7 @@ export function DashboardOverview({
               <div className="flex h-full flex-col gap-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-white">Needs attention</p>
+                    <p className="text-sm font-semibold text-white">Graph projection</p>
                     <p className="mt-2 text-sm leading-6 text-slate-400">Portfolio vs benchmark</p>
                   </div>
                   <Badge
@@ -768,22 +768,20 @@ export function DashboardOverview({
         </section>
 
         <section className="grid gap-3 md:hidden">
-          <details className="rounded-[1.4rem] border border-slate-800/70 bg-[#0f1830] text-slate-100 shadow-[0_20px_60px_rgba(2,6,23,0.2)]">
-            <summary className="cursor-pointer list-none rounded-[1.4rem] px-4 py-4">
-              <div className="flex items-center justify-between gap-3">
+          <div className="rounded-[1.4rem] border border-slate-800/70 bg-[#0f1830] text-slate-100 shadow-[0_20px_60px_rgba(2,6,23,0.2)]">
+            <div className="px-4 py-4">
+              <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-slate-400">Needs attention</p>
                   <p className="mt-1 text-base font-semibold text-white">
                     Three plain-language prompts replace the old long checklist.
                   </p>
                 </div>
-                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-slate-300">
-                  Tap to expand
-                </span>
+                <Badge variant="outline" className="border-white/10 bg-white/5 text-slate-200">
+                  3 actions
+                </Badge>
               </div>
-            </summary>
-            <CardContent className="px-4 pb-4 pt-0">
-              <div className="grid gap-3">
+              <div className="mt-4 grid gap-3">
                 <ActionPrompt
                   icon={<CheckCircle2 className="h-4 w-4" />}
                   title="Log today&apos;s deposit"
@@ -809,16 +807,16 @@ export function DashboardOverview({
                   tone="blue"
                 />
               </div>
-            </CardContent>
-          </details>
+            </div>
+          </div>
 
           <details className="rounded-[1.4rem] border border-slate-800/70 bg-[#0f1830] text-slate-100 shadow-[0_20px_60px_rgba(2,6,23,0.2)]">
             <summary className="cursor-pointer list-none rounded-[1.4rem] px-4 py-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-slate-400">Recent activity</p>
+                  <p className="text-sm font-semibold text-slate-400">Graph projection</p>
                   <p className="mt-1 text-base font-semibold text-white">
-                    A visual feed that feels like a timeline, not a spreadsheet.
+                    Portfolio vs benchmark
                   </p>
                 </div>
                 <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-slate-300">
